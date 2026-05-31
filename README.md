@@ -21,7 +21,7 @@ ginger redeploy                 # deploy without booting the proxy or pruning
 ginger rollback <version>       # switch traffic back to a previous container
 ginger remove                   # deregister from proxy and remove all containers
 ginger config                   # print the parsed config (redacted secrets)
-ginger version                  # print ginger 0.1.1
+ginger version                  # print ginger version
 ginger help
 ```
 
