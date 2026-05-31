@@ -1,0 +1,19 @@
+README.md
+  s_9232629e5888c0::t_a94d3d0ba5a4c5 9,12-20,31-35,39,64,75,81,86,116,118-119,122-123,126-128,130,134,139-140,142-143,148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "9d71acbe08ba3d87503d09c77801a652d155b9e7",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
