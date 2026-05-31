@@ -1,0 +1,28 @@
+# Erlang/OTP
+*.beam
+*.ez
+erl_crash.dump
+
+# Gleam build output
+/build
+
+# Gleam package cache
+.gleam/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local env
+.env
+.env.local
+
+# Reference / scratch
+/learn
