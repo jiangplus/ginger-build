@@ -1,0 +1,47 @@
+service: blog
+image: ghcr.io/acme/blog
+
+servers:
+  web:
+    hosts: [10.0.0.1, 10.0.0.2, 10.0.0.3]
+    primary: true
+  worker:
+    hosts: [10.0.0.4]
+    cmd: bundle exec sidekiq
+
+registry:
+  server: ghcr.io
+  username: acme-ci
+  password: GITHUB_TOKEN
+
+proxy:
+  host: blog.example.com
+  app_port: 3000
+  ssl: true
+  health_check_path: /up
+
+env:
+  RAILS_ENV: production
+  DB_HOST: 10.0.0.9
+
+secrets:
+  load: [.env]
+  inject:
+    - RAILS_MASTER_KEY
+    - "STRIPE_*"
+
+rolling:
+  limit: 25%
+  wait: 5
+
+pipelines:
+  deploy:
+    - build
+    - push
+    - lock: acquire
+    - hook: ./bin/check-db
+    - boot-proxy
+    - hook: { run: 'echo deploying $GINGER_VERSION', local: true }
+    - boot-app: { rolling: true }
+    - prune
+    - lock: release
