@@ -233,17 +233,27 @@ pub fn boot_host(
   }
 }
 
-/// Ensure a proxy is available on the host. If one is already running (e.g. a
-/// shared `kamal-proxy`), reuse it untouched and return its name. Otherwise
-/// boot ginger's own proxy on the ginger network. Returns the proxy container
-/// name to register against.
+/// The name of the running kamal-proxy container on this host, or None.
+fn detect_proxy(context: Context, host: String) -> option.Option(String) {
+  let #(found, _) = context.runner.probe(host, proxy_cmd.detect())
+  case string.trim(found) {
+    "" -> None
+    name -> Some(name)
+  }
+}
+
+/// Ensure a proxy is available on the host. Reuses an existing one if found;
+/// otherwise boots ginger's own on the ginger network.
 pub fn ensure_proxy(
   context: Context,
   host: String,
 ) -> Result(String, GingerError) {
-  let #(found, _) = context.runner.probe(host, proxy_cmd.detect())
-  case string.trim(found) {
-    "" -> {
+  case detect_proxy(context, host) {
+    Some(name) -> {
+      context.log("Reusing existing proxy '" <> name <> "' on " <> host)
+      Ok(name)
+    }
+    None -> {
       context.log(
         "No proxy on " <> host <> "; booting " <> proxy_cmd.container <> "...",
       )
@@ -254,22 +264,15 @@ pub fn ensure_proxy(
       use _ <- result.try(context.runner.remote(host, proxy_cmd.start_or_run()))
       Ok(proxy_cmd.container)
     }
-    name -> {
-      context.log("Reusing existing proxy '" <> name <> "' on " <> host)
-      Ok(name)
-    }
   }
 }
 
-/// Determine the proxy container and the docker network it is on for a host.
-/// Falls back to ginger's own proxy name + network when none is found.
-/// Public so the remove step in pipeline.gleam can deregister against the
-/// correct proxy.
+/// Determine the proxy container and docker network for a host.
+/// Public so the remove step in pipeline.gleam can deregister correctly.
 pub fn resolve_proxy_info(context: Context, host: String) -> #(String, String) {
-  let #(found, _) = context.runner.probe(host, proxy_cmd.detect())
-  case string.trim(found) {
-    "" -> #(proxy_cmd.container, app.network)
-    name -> {
+  case detect_proxy(context, host) {
+    None -> #(proxy_cmd.container, app.network)
+    Some(name) -> {
       let #(net, _) = context.runner.probe(host, proxy_cmd.network_of(name))
       case string.trim(net) {
         "" -> #(name, app.network)

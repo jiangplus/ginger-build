@@ -2,24 +2,18 @@ import ginger/config.{type Config}
 import ginger/error.{type GingerError, ConfigError}
 import gleam/list
 import gleam/option
+import gleam/result
 import gleam/string
 
 /// Run post-decode guards. Returns the config unchanged on success.
 pub fn validate(config: Config) -> Result(Config, GingerError) {
-  use _ <- result_try(check_service_name(config))
-  use _ <- result_try(check_roles_present(config))
-  use _ <- result_try(check_roles_have_hosts(config))
-  use _ <- result_try(check_single_primary(config))
-  use _ <- result_try(check_remote_builder_url(config))
-  use _ <- result_try(check_retain_containers(config))
+  use _ <- result.try(check_service_name(config))
+  use _ <- result.try(check_roles_present(config))
+  use _ <- result.try(check_roles_have_hosts(config))
+  use _ <- result.try(check_single_primary(config))
+  use _ <- result.try(check_remote_builder_url(config))
+  use _ <- result.try(check_retain_containers(config))
   Ok(config)
-}
-
-fn result_try(res: Result(a, e), next: fn(a) -> Result(b, e)) -> Result(b, e) {
-  case res {
-    Ok(v) -> next(v)
-    Error(e) -> Error(e)
-  }
 }
 
 fn check_service_name(config: Config) -> Result(Nil, GingerError) {

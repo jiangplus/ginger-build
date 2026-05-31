@@ -6,8 +6,8 @@ import ginger/commands/proxy as proxy_cmd
 import ginger/commands/prune as prune_cmd
 import ginger/commands/registry as registry_cmd
 import ginger/config.{
-  type Pipeline, type Step, Acquire, BootApp, BootProxy, Build, Healthcheck,
-  Hook, Lock, Prune, Push, Release, RemoveApp, Status,
+  type Pipeline, type Role, type Step, Acquire, BootApp, BootProxy, Build,
+  Healthcheck, Hook, Lock, Prune, Push, Release, RemoveApp, Status,
 }
 import ginger/context.{type Context}
 import ginger/error.{type GingerError, ConfigError, LockError}
@@ -77,35 +77,38 @@ fn remove_app(context: Context) -> Result(Context, GingerError) {
   use _ <- result.try(
     list.try_fold(context.config.servers, Nil, fn(_, role) {
       list.try_fold(role.hosts, Nil, fn(_, host) {
-        // 1. Deregister from proxy
-        let #(proxy_container, _) = boot.resolve_proxy_info(context, host)
-        case context.config.proxy {
-          option.Some(_) -> {
-            let _ =
-              context.runner.remote(
-                host,
-                proxy_cmd.remove(context.config, role, proxy_container),
-              )
-            Nil
-          }
-          option.None -> Nil
-        }
-        // 2. Stop then remove all containers for this role
-        context.log("  " <> role.name <> " on " <> host)
-        let _ =
-          context.runner.remote(
-            host,
-            app_cmd.stop_all(context.config, role.name),
-          )
-        use _ <- result.try(context.runner.remote(
-          host,
-          app_cmd.remove_all(context.config, role.name),
-        ))
-        Ok(Nil)
+        remove_host(context, role, host)
       })
     }),
   )
   Ok(context)
+}
+
+fn remove_host(
+  context: Context,
+  role: config.Role,
+  host: String,
+) -> Result(Nil, GingerError) {
+  let #(proxy_container, _) = boot.resolve_proxy_info(context, host)
+  case context.config.proxy {
+    Some(_) -> {
+      let _ =
+        context.runner.remote(
+          host,
+          proxy_cmd.remove(context.config, role, proxy_container),
+        )
+      Nil
+    }
+    _ -> Nil
+  }
+  context.log("  " <> role.name <> " on " <> host)
+  let _ =
+    context.runner.remote(host, app_cmd.stop_all(context.config, role.name))
+  use _ <- result.try(context.runner.remote(
+    host,
+    app_cmd.remove_all(context.config, role.name),
+  ))
+  Ok(Nil)
 }
 
 fn prune(context: Context) -> Result(Context, GingerError) {

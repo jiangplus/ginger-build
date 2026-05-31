@@ -1,4 +1,6 @@
+import gleam/list
 import gleam/option.{type Option}
+import gleam/result
 
 /// The fully parsed `ginger.yml`. Required sections (service, image, servers,
 /// registry) are non-optional; everything else carries a sensible default when
@@ -98,99 +100,34 @@ pub type HookSpec {
 
 /// Look up a role by name.
 pub fn role(config: Config, name: String) -> Result(Role, Nil) {
-  case config.servers {
-    [] -> Error(Nil)
-    roles -> find_role(roles, name)
-  }
-}
-
-fn find_role(roles: List(Role), name: String) -> Result(Role, Nil) {
-  case roles {
-    [] -> Error(Nil)
-    [r, ..rest] ->
-      case r.name == name {
-        True -> Ok(r)
-        False -> find_role(rest, name)
-      }
-  }
+  list.find(config.servers, fn(r) { r.name == name })
 }
 
 /// The first host of the primary role — where the deploy lock is held.
 pub fn primary_host(config: Config) -> Result(String, Nil) {
-  case primary_role(config) {
-    Ok(role) ->
-      case role.hosts {
-        [host, ..] -> Ok(host)
-        [] -> Error(Nil)
-      }
-    Error(_) -> Error(Nil)
-  }
-}
-
-/// The primary role, if one is marked.
-pub fn primary_role(config: Config) -> Result(Role, Nil) {
-  case list_find(config.servers, fn(r) { r.primary }) {
-    Ok(r) -> Ok(r)
-    Error(_) ->
-      // fall back to the first role
-      case config.servers {
-        [first, ..] -> Ok(first)
-        [] -> Error(Nil)
-      }
-  }
-}
-
-fn list_find(items: List(a), pred: fn(a) -> Bool) -> Result(a, Nil) {
-  case items {
+  use role <- result.try(primary_role(config))
+  case role.hosts {
+    [host, ..] -> Ok(host)
     [] -> Error(Nil)
-    [x, ..rest] ->
-      case pred(x) {
-        True -> Ok(x)
-        False -> list_find(rest, pred)
-      }
   }
 }
 
-/// All unique hosts across all roles.
+/// The primary role, if one is marked; falls back to the first role.
+pub fn primary_role(config: Config) -> Result(Role, Nil) {
+  list.find(config.servers, fn(r) { r.primary })
+  |> result.lazy_or(fn() {
+    case config.servers {
+      [first, ..] -> Ok(first)
+      [] -> Error(Nil)
+    }
+  })
+}
+
+/// All unique hosts across all roles, in declaration order.
 pub fn all_hosts(config: Config) -> List(String) {
   config.servers
-  |> fold_hosts([])
-}
-
-fn fold_hosts(roles: List(Role), acc: List(String)) -> List(String) {
-  case roles {
-    [] -> acc
-    [r, ..rest] -> fold_hosts(rest, append_unique(acc, r.hosts))
-  }
-}
-
-fn append_unique(acc: List(String), items: List(String)) -> List(String) {
-  case items {
-    [] -> acc
-    [x, ..rest] ->
-      case contains(acc, x) {
-        True -> append_unique(acc, rest)
-        False -> append_unique(list_append(acc, x), rest)
-      }
-  }
-}
-
-fn contains(items: List(String), target: String) -> Bool {
-  case items {
-    [] -> False
-    [x, ..rest] ->
-      case x == target {
-        True -> True
-        False -> contains(rest, target)
-      }
-  }
-}
-
-fn list_append(items: List(String), item: String) -> List(String) {
-  case items {
-    [] -> [item]
-    [x, ..rest] -> [x, ..list_append(rest, item)]
-  }
+  |> list.flat_map(fn(role) { role.hosts })
+  |> list.unique
 }
 
 /// The container name for a role at a version: `service-role-version`.

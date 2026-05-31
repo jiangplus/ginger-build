@@ -1,7 +1,7 @@
 import ginger/config.{type Secrets}
 import gleam/dict.{type Dict}
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option, from_result}
 import gleam/string
 
 /// Read environment access and local files via FFI.
@@ -34,10 +34,7 @@ pub fn merge(
 
 /// Resolve a single secret by exact name (e.g. registry password).
 pub fn resolve(secrets: Dict(String, String), name: String) -> Option(String) {
-  case dict.get(secrets, name) {
-    Ok(value) -> Some(value)
-    Error(_) -> None
-  }
+  dict.get(secrets, name) |> from_result
 }
 
 /// Validate that every exact (non-glob) name in `patterns` is present in the
@@ -47,12 +44,18 @@ pub fn missing_keys(
   secrets: Dict(String, String),
   patterns: List(String),
 ) -> List(String) {
-  patterns
-  |> list.filter(fn(p) { !string.contains(p, "*") })
-  |> list.filter(fn(key) {
-    case dict.get(secrets, key) {
-      Ok(v) -> string.trim(v) == ""
-      Error(_) -> True
+  list.filter_map(patterns, fn(p) {
+    case string.contains(p, "*") {
+      True -> Error(Nil)
+      False ->
+        case dict.get(secrets, p) {
+          Ok(v) ->
+            case string.trim(v) == "" {
+              True -> Ok(p)
+              False -> Error(Nil)
+            }
+          Error(_) -> Ok(p)
+        }
     }
   })
 }

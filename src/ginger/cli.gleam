@@ -6,7 +6,7 @@ import ginger/commands/proxy as commands_proxy
 import ginger/config.{type Config, container_prefix, primary_host}
 import ginger/config/decode
 import ginger/config/validate
-import ginger/context.{type Context, Context}
+import ginger/context
 import ginger/deploy
 import ginger/error.{type GingerError, ConfigError}
 import ginger/fs
@@ -160,16 +160,21 @@ fn load_config(path: String) -> Result(Config, GingerError) {
   validate.validate(config)
 }
 
-// --- config dump -----------------------------------------------------------
-
-fn dump_config(path: String) -> Nil {
+/// Load config and run `then`, or print an error and halt.
+fn with_config(path: String, then: fn(Config) -> Nil) -> Nil {
   case load_config(path) {
-    Ok(config) -> io.println(render_config(config))
-    Error(err) -> {
-      io.println("✗ " <> error.to_string(err))
+    Ok(cfg) -> then(cfg)
+    Error(e) -> {
+      io.println("✗ " <> error.to_string(e))
       halt(1)
     }
   }
+}
+
+// --- config dump -----------------------------------------------------------
+
+fn dump_config(path: String) -> Nil {
+  with_config(path, fn(cfg) { io.println(render_config(cfg)) })
 }
 
 fn render_config(config: Config) -> String {
@@ -225,96 +230,82 @@ fn render_config(config: Config) -> String {
 // --- lock subcommands -------------------------------------------------------
 
 fn run_lock(action: String, config_path: String) -> Nil {
-  case load_config(config_path) {
-    Error(e) -> {
-      io.println("✗ " <> error.to_string(e))
-      halt(1)
-    }
-    Ok(cfg) -> {
-      let r = runner.real(cfg.ssh_user)
-      case primary_host(cfg) {
-        Error(_) -> {
-          io.println("✗ no primary host in config")
-          halt(1)
+  with_config(config_path, fn(cfg) {
+    let r = runner.real(cfg.ssh_user)
+    case primary_host(cfg) {
+      Error(_) -> {
+        io.println("✗ no primary host in config")
+        halt(1)
+      }
+      Ok(host) -> {
+        let cmd = case action {
+          "release" -> commands_lock.release(cfg)
+          "status" -> commands_lock.status(cfg)
+          _ -> commands_lock.acquire(cfg)
         }
-        Ok(host) -> {
-          let cmd = case action {
-            "release" -> commands_lock.release(cfg)
-            "status" -> commands_lock.status(cfg)
-            _ -> commands_lock.acquire(cfg)
-          }
-          case r.remote(host, cmd) {
-            Ok(out) ->
-              case string.trim(out) {
-                "" -> io.println("✓ lock " <> action)
-                s -> io.println(s)
-              }
-            Error(e) -> {
-              io.println("✗ " <> error.to_string(e))
-              halt(1)
+        case r.remote(host, cmd) {
+          Ok(out) ->
+            case string.trim(out) {
+              "" -> io.println("✓ lock " <> action)
+              s -> io.println(s)
             }
+          Error(e) -> {
+            io.println("✗ " <> error.to_string(e))
+            halt(1)
           }
         }
       }
     }
-  }
+  })
 }
 
 // --- status -----------------------------------------------------------------
 
 fn run_status(config_path: String) -> Nil {
-  case load_config(config_path) {
-    Error(e) -> {
-      io.println("✗ " <> error.to_string(e))
-      halt(1)
-    }
-    Ok(cfg) -> {
-      let r = runner.real(cfg.ssh_user)
-      list.each(cfg.servers, fn(role) {
-        list.each(role.hosts, fn(host) {
-          let #(names, _) =
-            r.probe(host, commands_app.running_names(cfg, role.name))
-          let version = case string.trim(names) {
-            "" -> "(none)"
-            out -> {
-              let prefix = container_prefix(cfg, role.name) <> "-"
-              out
-              |> string.split("\n")
-              |> list.first
-              |> result.unwrap("")
-              |> string.trim
-              |> fn(n) {
-                case string.starts_with(n, prefix) {
-                  True -> string.drop_start(n, string.length(prefix))
-                  False -> n
-                }
-              }
-            }
-          }
-          io.println(role.name <> "@" <> host <> "  version=" <> version)
-        })
-      })
-      // Show proxy registrations from the primary host.
-      case primary_host(cfg) {
-        Ok(host) -> {
-          let #(proxy_name, _) = r.probe(host, commands_proxy.detect())
-          case string.trim(proxy_name) {
-            "" -> io.println("proxy: none detected")
-            name -> {
-              let list_cmd =
-                command.raw("docker exec " <> name <> " kamal-proxy list")
-              case r.remote(host, list_cmd) {
-                Ok(out) -> io.println("\nproxy (" <> name <> "):\n" <> out)
-                Error(_) ->
-                  io.println("proxy: " <> name <> " (could not query)")
+  with_config(config_path, fn(cfg) {
+    let r = runner.real(cfg.ssh_user)
+    list.each(cfg.servers, fn(role) {
+      list.each(role.hosts, fn(host) {
+        let #(names, _) =
+          r.probe(host, commands_app.running_names(cfg, role.name))
+        let version = case string.trim(names) {
+          "" -> "(none)"
+          out -> {
+            let prefix = container_prefix(cfg, role.name) <> "-"
+            out
+            |> string.split("\n")
+            |> list.first
+            |> result.unwrap("")
+            |> string.trim
+            |> fn(n) {
+              case string.starts_with(n, prefix) {
+                True -> string.drop_start(n, string.length(prefix))
+                False -> n
               }
             }
           }
         }
-        Error(_) -> Nil
+        io.println(role.name <> "@" <> host <> "  version=" <> version)
+      })
+    })
+    case primary_host(cfg) {
+      Ok(host) -> {
+        let #(proxy_name, _) = r.probe(host, commands_proxy.detect())
+        case string.trim(proxy_name) {
+          "" -> io.println("proxy: none detected")
+          name -> {
+            let list_cmd =
+              command.raw("docker exec " <> name <> " kamal-proxy list")
+            case r.remote(host, list_cmd) {
+              Ok(out) -> io.println("\nproxy (" <> name <> "):\n" <> out)
+              Error(_) -> io.println("proxy: " <> name <> " (could not query)")
+            }
+          }
+        }
       }
+      Error(_) -> Nil
     }
-  }
+  })
 }
 
 // --- arg helpers -----------------------------------------------------------
