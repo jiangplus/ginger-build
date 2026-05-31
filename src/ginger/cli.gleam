@@ -22,7 +22,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 
-const version_string = "ginger 0.1.2"
+const version_string = "ginger 0.1.3"
 
 /// A parsed CLI invocation. Kept separate from execution so routing is pure
 /// and unit-testable.
