@@ -58,6 +58,18 @@ pub fn route_remove_test() {
     == RunPipeline("remove", "x.yml", True, None)
 }
 
+pub fn route_lock_test() {
+  assert cli.route(["lock", "release"]) == cli.LockCmd("release", "ginger.yml")
+  assert cli.route(["lock", "status", "-c", "x.yml"])
+    == cli.LockCmd("status", "x.yml")
+  assert cli.route(["lock", "acquire"]) == cli.LockCmd("acquire", "ginger.yml")
+}
+
+pub fn route_status_test() {
+  assert cli.route(["status"]) == cli.StatusCmd("ginger.yml")
+  assert cli.route(["status", "-c", "x.yml"]) == cli.StatusCmd("x.yml")
+}
+
 pub fn route_custom_pipeline_test() {
   assert cli.route(["smoke-test"])
     == RunPipeline("smoke-test", "ginger.yml", False, None)

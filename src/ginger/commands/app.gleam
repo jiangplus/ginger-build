@@ -8,15 +8,48 @@ import gleam/string
 /// existing proxy is reused, the app joins that proxy's network instead.
 pub const network = "ginger"
 
-/// `docker run --detach ...` for a role's container at a version. `env_pairs`
-/// are the plain + injected secret env vars to set on the container; `network`
+/// The remote path where ginger writes the per-container env-file.
+/// Using --env-file keeps secret values out of `docker run` args and `ps`.
+pub fn env_file_path(
+  config: Config,
+  role_name: String,
+  version: String,
+) -> String {
+  "/tmp/.ginger-"
+  <> config.service
+  <> "-"
+  <> role_name
+  <> "-"
+  <> version
+  <> ".env"
+}
+
+/// Write KEY=VALUE pairs to a tmpfile on the host using a quoted heredoc so
+/// values with special characters are written literally and never appear in
+/// the process argument list.
+pub fn write_env_file(path: String, pairs: List(#(String, String))) -> Command {
+  let lines = string.join(list.map(pairs, fn(p) { p.0 <> "=" <> p.1 }), "\n")
+  command.raw(
+    "cat > " <> path <> " << 'GINGER_ENV_EOF'\n" <> lines <> "\nGINGER_ENV_EOF",
+  )
+}
+
+/// Remove the env-file after the container is up (best-effort cleanup).
+pub fn remove_env_file(path: String) -> Command {
+  command.run(["rm", "-f", path])
+}
+
+/// `docker run --detach ...` for a role's container at a version.
+/// Secrets are loaded from `env_file_path` (already written to the host);
+/// non-secret plain env vars are passed inline via `--env`. `network`
 /// is the docker network to join (the proxy's network).
 pub fn run(
   config: Config,
   role: Role,
   host: String,
   version: String,
-  env_pairs: List(#(String, String)),
+  plain_env: List(#(String, String)),
+  env_file: String,
   network: String,
 ) -> Command {
   let name = container_name(config, role.name, version)
@@ -30,7 +63,8 @@ pub fn run(
         #("GINGER_VERSION", version),
         #("GINGER_HOST", host),
       ]),
-      command.flag_pairs("--env", env_pairs),
+      command.flag_pairs("--env", plain_env),
+      ["--env-file", env_file],
       command.flag_pairs("--label", [
         #("service", config.service),
         #("role", role.name),

@@ -73,12 +73,14 @@ pub fn app_run_test() {
       "10.0.0.1",
       "abc1234",
       [#("RAILS_ENV", "production")],
+      "/tmp/.ginger-blog-web-abc1234.env",
       "ginger",
     )
   assert command.to_string(cmd)
     == "docker run --detach --restart unless-stopped --name blog-web-abc1234 --network ginger"
     <> " --env GINGER_CONTAINER_NAME='blog-web-abc1234' --env GINGER_VERSION='abc1234' --env GINGER_HOST='10.0.0.1'"
     <> " --env RAILS_ENV='production'"
+    <> " --env-file /tmp/.ginger-blog-web-abc1234.env"
     <> " --label service='blog' --label role='web' --label version='abc1234'"
     <> " ghcr.io/acme/blog:abc1234"
 }
@@ -91,12 +93,27 @@ pub fn app_run_with_cmd_test() {
       primary: False,
       cmd: Some("bundle exec sidekiq"),
     )
-  let cmd = app.run(test_config(), worker, "10.0.0.4", "abc1234", [], "kamal")
+  let cmd =
+    app.run(
+      test_config(),
+      worker,
+      "10.0.0.4",
+      "abc1234",
+      [],
+      "/tmp/ef",
+      "kamal",
+    )
   assert command.to_string(cmd)
     == "docker run --detach --restart unless-stopped --name blog-worker-abc1234 --network kamal"
     <> " --env GINGER_CONTAINER_NAME='blog-worker-abc1234' --env GINGER_VERSION='abc1234' --env GINGER_HOST='10.0.0.4'"
+    <> " --env-file /tmp/ef"
     <> " --label service='blog' --label role='worker' --label version='abc1234'"
     <> " ghcr.io/acme/blog:abc1234 bundle exec sidekiq"
+}
+
+pub fn app_env_file_path_test() {
+  assert app.env_file_path(test_config(), "web", "abc1234")
+    == "/tmp/.ginger-blog-web-abc1234.env"
 }
 
 pub fn app_remove_test() {

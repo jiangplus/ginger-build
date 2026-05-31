@@ -40,6 +40,23 @@ pub fn resolve(secrets: Dict(String, String), name: String) -> Option(String) {
   }
 }
 
+/// Validate that every exact (non-glob) name in `patterns` is present in the
+/// secret map. Returns a list of missing keys so the caller can fail early with
+/// a descriptive message before starting the deploy.
+pub fn missing_keys(
+  secrets: Dict(String, String),
+  patterns: List(String),
+) -> List(String) {
+  patterns
+  |> list.filter(fn(p) { !string.contains(p, "*") })
+  |> list.filter(fn(key) {
+    case dict.get(secrets, key) {
+      Ok(v) -> string.trim(v) == ""
+      Error(_) -> True
+    }
+  })
+}
+
 /// Select the secrets to inject into containers: every key matching one of the
 /// `inject` patterns (exact name or glob with `*`). Returned sorted by key for
 /// deterministic command output.

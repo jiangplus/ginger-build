@@ -42,11 +42,12 @@ fn test_config() -> Config {
 fn recording_context(sink: Subject(String), existing_proxy: String) -> Context {
   let probe = fn(_host, cmd) {
     let s = command.to_string(cmd)
-    let is_detect = string.contains(s, "kamal-proxy")
     let is_network = string.contains(s, "NetworkSettings.Networks")
-    case is_detect, is_network {
-      True, _ -> #(existing_proxy, 0)
-      _, True -> #("kamal", 0)
+    let is_detect = string.contains(s, "kamal-proxy")
+    // network_of check must come first (its command also contains "kamal-proxy")
+    case is_network, is_detect {
+      True, _ -> #("kamal", 0)
+      _, True -> #(existing_proxy, 0)
       _, _ -> #("", 1)
     }
   }
@@ -96,15 +97,19 @@ pub fn deploy_boots_own_proxy_when_none_exists_test() {
   let assert Ok(_) = pipeline.run(ctx, pl)
   let commands = drain(sink, [])
 
-  let assert [build, net, proxy, app, deploy, prune] = commands
+  // build, net, proxy, write-env-file, app-run, rm-env-file, proxy-deploy, prune
+  let assert [build, net, proxy, env_write, app, _env_rm, deploy, prune] =
+    commands
   assert string.starts_with(build, "local:docker buildx build --push")
   assert string.contains(net, "docker network create ginger")
   assert string.contains(
     proxy,
     "docker container start ginger-proxy || docker run",
   )
+  assert string.contains(env_write, "GINGER_ENV_EOF")
   assert string.contains(app, "docker run --detach")
   assert string.contains(app, "--network ginger")
+  assert string.contains(app, "--env-file")
   assert string.contains(
     deploy,
     "docker exec ginger-proxy kamal-proxy deploy blog-web --target blog-web-v1:3000",
@@ -205,17 +210,22 @@ pub fn deploy_reuses_existing_proxy_test() {
   let assert Ok(_) = pipeline.run(ctx, pl)
   let commands = drain(sink, [])
 
-  // build, app run, proxy deploy, prune — and crucially NO `docker run ... ginger-proxy`.
-  let assert [build, app, deploy, prune] = commands
+  // build, write-env-file, app-run, rm-env-file, proxy-deploy, prune
+  let assert [build, env_write, app, _env_rm, deploy, prune] = commands
   assert string.starts_with(build, "local:docker buildx build --push")
+  assert string.contains(env_write, "GINGER_ENV_EOF")
   assert string.contains(app, "docker run --detach")
   assert string.contains(app, "--network kamal")
+  assert string.contains(app, "--env-file")
   assert string.contains(
     deploy,
     "docker exec kamal-proxy kamal-proxy deploy blog-web --target blog-web-v1:3000",
   )
   assert string.contains(prune, "docker container prune")
   // no proxy was booted
-  assert list.any(commands, fn(c) { string.contains(c, "ginger-proxy") })
+  assert list.any(commands, fn(c) {
+      string.contains(c, "start ginger-proxy")
+      || string.contains(c, "run --name ginger-proxy")
+    })
     == False
 }

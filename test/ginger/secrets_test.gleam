@@ -56,6 +56,19 @@ pub fn injected_selects_matching_keys_sorted_test() {
     ]
 }
 
+pub fn missing_keys_exact_test() {
+  let map = dict.from_list([#("A", "1"), #("B", "")])
+  // "A" present and non-empty → not missing; "B" empty → missing; "C" absent → missing
+  assert secrets.missing_keys(map, ["A", "B", "C"]) == ["B", "C"]
+}
+
+pub fn missing_keys_ignores_globs_test() {
+  let map = dict.from_list([])
+  // globs are not validated (you can't tell if they'll match at runtime)
+  assert secrets.missing_keys(map, ["STRIPE_*", "RAILS_MASTER_KEY"])
+    == ["RAILS_MASTER_KEY"]
+}
+
 pub fn merge_overrides_test() {
   let base = dict.from_list([#("A", "1"), #("B", "2")])
   let merged = secrets.merge(base, [#("B", "override"), #("C", "3")])

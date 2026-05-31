@@ -34,9 +34,18 @@ pub type Context {
   )
 }
 
-/// The env pairs to inject into containers: plain `env` plus matched secrets.
+/// Plain (non-secret) env pairs from the config — passed inline as `--env`.
+pub fn plain_env(context: Context) -> List(#(String, String)) {
+  context.config.env
+}
+
+/// Secret env pairs resolved from the merged secret map — written to an
+/// env-file on the host so they never appear in `docker run` process args.
+pub fn secret_env(context: Context) -> List(#(String, String)) {
+  secrets.injected(context.secrets, context.config.secrets.inject)
+}
+
+/// All container env (plain + secrets). Used by tests and the old code path.
 pub fn container_env(context: Context) -> List(#(String, String)) {
-  let injected =
-    secrets.injected(context.secrets, context.config.secrets.inject)
-  list.append(context.config.env, injected)
+  list.append(plain_env(context), secret_env(context))
 }

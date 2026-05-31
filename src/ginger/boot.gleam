@@ -1,10 +1,12 @@
 import ginger/barrier
 import ginger/commands/app
 import ginger/commands/proxy as proxy_cmd
+import ginger/commands/registry as registry_cmd
 import ginger/config.{type Config, type Role, container_prefix}
-import ginger/context.{type Context}
+import ginger/context.{type Context, plain_env, secret_env}
 import ginger/error.{type GingerError, DeployAborted}
 import ginger/rolling
+import ginger/secrets
 import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -179,21 +181,36 @@ pub fn boot_host(
     context.runner.probe(host, app.running_names(config, role.name))
   let old_version = parse_old_version(config, role.name, running_out)
 
+  // Login to the registry on the deploy host so docker pull succeeds.
+  use _ <- result.try(
+    case secrets.resolve(context.secrets, config.registry.password) {
+      Some(password) ->
+        context.runner.remote(
+          host,
+          registry_cmd.login_stdin(config.registry, password),
+        )
+      option.None -> Ok("")
+    },
+  )
+
   // Find which proxy serves this host and which network it is on, so the app
   // joins the right network and is registered with the right proxy container.
   let #(proxy_container, network) = resolve_proxy_info(context, host)
 
+  // Write secrets to a tmpfile so they stay out of `docker run` process args.
+  let env_file = app.env_file_path(config, role.name, version)
   use _ <- result.try(context.runner.remote(
     host,
-    app.run(
-      config,
-      role,
-      host,
-      version,
-      context.container_env(context),
-      network,
-    ),
+    app.write_env_file(env_file, secret_env(context)),
   ))
+
+  use _ <- result.try(context.runner.remote(
+    host,
+    app.run(config, role, host, version, plain_env(context), env_file, network),
+  ))
+
+  // Clean up the env-file once the container is running.
+  let _ = context.runner.remote(host, app.remove_env_file(env_file))
 
   use _ <- result.try(case config.proxy {
     Some(proxy) ->
