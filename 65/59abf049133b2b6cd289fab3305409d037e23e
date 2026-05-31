@@ -1,0 +1,20 @@
+justfile
+  s_9232629e5888c0::t_41ad2f324f7171 1-19
+  s_9232629e5888c0::t_3ad374614fd0d5 20-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "6559abf049133b2b6cd289fab3305409d037e23e",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
