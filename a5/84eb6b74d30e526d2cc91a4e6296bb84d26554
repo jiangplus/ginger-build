@@ -1,0 +1,59 @@
+src/ginger/context.gleam
+  s_9232629e5888c0::t_240db34ba30a01 37-48,50
+src/ginger/cli.gleam
+  s_9232629e5888c0::t_d5042826fb8c5b 17
+  s_9232629e5888c0::t_6c46f838e59553 360-363,365,372
+  s_9232629e5888c0::t_a00f39fee98db9 247-251,275-276,304-305,308-309
+  s_9232629e5888c0::t_fe7fb7b571cee3 2-5
+  s_9232629e5888c0::t_561105a2bfd536 69-72
+  s_9232629e5888c0::t_6d384220fa633e 39-40
+  s_9232629e5888c0::t_9d9df40d716524 119-128,137,139-149
+  s_9232629e5888c0::t_e013e4748e19e7 89-90
+  s_9232629e5888c0::t_5a8b228f8df8b8 6
+  s_9232629e5888c0::t_860989d072a86a 138
+  s_9232629e5888c0::t_5fbbf8f6d74744 235,280,298
+  s_9232629e5888c0::t_69a341275b7797 225-234,236-246,252-274,277-279,281-297,299-303,306-307,310-319
+src/ginger/commands/registry.gleam
+  s_9232629e5888c0::t_39a402b5978de2 4-5,17-29
+test/ginger/secrets_test.gleam
+  s_9232629e5888c0::t_ad3b3493a9b170 59-67,70-71
+  s_9232629e5888c0::t_a00f39fee98db9 68-69
+test/ginger/commands_test.gleam
+  s_9232629e5888c0::t_01ab4bb1ce76e8 76,83,96,109,114-116
+  s_9232629e5888c0::t_a00f39fee98db9 97-105
+test/ginger/pipeline_test.gleam
+  s_9232629e5888c0::t_cfe73fb4f0a134 100,109,112
+  s_9232629e5888c0::t_f423afdf16affb 216,219,226
+  s_9232629e5888c0::t_dc6d26da50e0f6 46-50
+  s_9232629e5888c0::t_a00f39fee98db9 101-102,227-229
+  s_9232629e5888c0::t_1edd95e506cd22 213-214
+src/ginger/commands/app.gleam
+  s_9232629e5888c0::t_48109ce5eb721e 11-12,25-29,31,35-44,51-52,66-67
+  s_9232629e5888c0::t_a00f39fee98db9 13-24,30,32-34
+test/ginger/cli_test.gleam
+  s_9232629e5888c0::t_92ff113f0bac12 61-72
+src/ginger/boot.gleam
+  s_9232629e5888c0::t_b39fe647dda693 184,195,200-203,205,212-213
+  s_9232629e5888c0::t_a00f39fee98db9 9,185-194
+  s_9232629e5888c0::t_8b2d8b8277dcf8 4
+  s_9232629e5888c0::t_2b9c1f3d054054 204,209
+  s_9232629e5888c0::t_2db26697d8dc36 6
+src/ginger/secrets.gleam
+  s_9232629e5888c0::t_e07fab1fec5cb9 43-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a584eb6b74d30e526d2cc91a4e6296bb84d26554",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
