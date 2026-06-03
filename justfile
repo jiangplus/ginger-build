@@ -16,10 +16,10 @@ check:
 shipment:
     gleam export erlang-shipment
 
-install: shipment
-    rm -rf $HOME/.local/share/ginger
-    cp -r build/erlang-shipment $HOME/.local/share/ginger
+escript:
+    gleam export escript
+
+install: escript
     mkdir -p $HOME/bin
-    printf '#!/bin/sh\nexec "$HOME/.local/share/ginger/entrypoint.sh" run "$@"\n' > $HOME/bin/ginger
-    chmod +x $HOME/bin/ginger
+    cp ginger $HOME/bin/ginger
     echo "Installed: $($HOME/bin/ginger version)"

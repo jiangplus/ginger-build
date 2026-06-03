@@ -14,10 +14,12 @@ Compared to Kamal, ginger makes four deliberate choices:
 ## Install
 
 ```sh
-just install   # builds the Erlang shipment and installs ~/bin/ginger
+just install   # builds a single-file escript and copies it to ~/bin/ginger
 ```
 
 Requires Erlang/OTP on the machine. `just` available from [just.systems](https://just.systems).
+
+You can also copy the generated `ginger` escript to any host that has Erlang installed — no other files needed.
 
 ## Commands
 
@@ -140,7 +142,8 @@ gleam run -- <command>        # run without installing
 gleam test                    # run the test suite (72 tests)
 gleam format src test         # format
 just build                    # gleam build
-just install                  # build shipment and install to ~/bin/ginger
+just escript                  # gleam export escript → ./ginger (single-file binary)
+just install                  # build escript and copy to ~/bin/ginger
 ```
 
 ## Example app

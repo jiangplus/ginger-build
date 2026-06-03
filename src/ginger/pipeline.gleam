@@ -6,7 +6,7 @@ import ginger/commands/proxy as proxy_cmd
 import ginger/commands/prune as prune_cmd
 import ginger/commands/registry as registry_cmd
 import ginger/config.{
-  type Pipeline, type Role, type Step, Acquire, BootApp, BootProxy, Build,
+  type Pipeline, type Step, Acquire, BootApp, BootProxy, Build,
   Healthcheck, Hook, Lock, Prune, Push, Release, RemoveApp, Status,
 }
 import ginger/context.{type Context}
