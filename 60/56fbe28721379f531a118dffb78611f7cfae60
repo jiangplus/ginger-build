@@ -1,0 +1,26 @@
+README.md
+  s_9232629e5888c0::t_1456f78b3ef712 17,22
+  s_9232629e5888c0::t_51d10da364fe8a 145-146
+src/ginger/pipeline.gleam
+  s_9232629e5888c0::t_7b5efd5d99f784 9
+justfile
+  s_9232629e5888c0::t_a247f0a67a9531 19-22,24
+.gitignore
+  s_9232629e5888c0::t_c8bd3d393f73ce 9-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "6056fbe28721379f531a118dffb78611f7cfae60",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
