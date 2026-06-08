@@ -114,7 +114,7 @@ fn decode_proxy(root: glaml.Node) -> Result(Option(Proxy), GingerError) {
   case field(root, "proxy") {
     Error(_) -> Ok(None)
     Ok(p) -> {
-      use host <- result.try(required_string(p, "host"))
+      use hosts <- result.try(decode_proxy_hosts(p))
       use app_port <- result.try(optional_int(p, "app_port", 80))
       let ssl = optional_bool_node(p, "ssl", False)
       let health =
@@ -123,7 +123,7 @@ fn decode_proxy(root: glaml.Node) -> Result(Option(Proxy), GingerError) {
       use drain_timeout <- result.try(optional_int(p, "drain_timeout", 30))
       Ok(
         Some(Proxy(
-          host: host,
+          hosts: hosts,
           app_port: app_port,
           ssl: ssl,
           health_check_path: health,
@@ -132,6 +132,23 @@ fn decode_proxy(root: glaml.Node) -> Result(Option(Proxy), GingerError) {
         )),
       )
     }
+  }
+}
+
+/// Accept `host: "a.com"` (scalar) or `hosts: [a.com, b.com]` (list).
+/// An empty proxy block with neither field produces an empty list (no routing).
+fn decode_proxy_hosts(p: glaml.Node) -> Result(List(String), GingerError) {
+  case field(p, "hosts"), field(p, "host") {
+    Ok(glaml.NodeSeq(items)), _ ->
+      list.try_map(items, fn(item) {
+        scalar_string(item)
+        |> result.replace_error(DecodeError("proxy host must be a scalar"))
+      })
+    _, Ok(node) ->
+      scalar_string(node)
+      |> result.map(fn(h) { [h] })
+      |> result.replace_error(DecodeError("proxy.host must be a string"))
+    _, _ -> Ok([])
   }
 }
 

@@ -202,7 +202,7 @@ fn render_config(config: Config) -> String {
 
   let proxy_line = case config.proxy {
     Some(proxy) ->
-      "proxy: " <> proxy.host <> " -> :" <> int.to_string(proxy.app_port)
+      "proxy: " <> string.join(proxy.hosts, ", ") <> " -> :" <> int.to_string(proxy.app_port)
     None -> "proxy: (none)"
   }
 

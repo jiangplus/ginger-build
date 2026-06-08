@@ -18,7 +18,7 @@ fn test_config() -> Config {
     servers: [Role(name: "web", hosts: ["10.0.0.1"], primary: True, cmd: None)],
     registry: Registry(server: "ghcr.io", username: "ci", password: "TOKEN"),
     proxy: Some(Proxy(
-      host: "blog.example.com",
+      hosts: ["blog.example.com"],
       app_port: 3000,
       ssl: True,
       health_check_path: "/up",

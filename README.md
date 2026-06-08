@@ -66,7 +66,8 @@ registry:
   password: GITHUB_TOKEN        # key name resolved from the secret map at deploy time
 
 proxy:
-  host: blog.example.com
+  host: blog.example.com        # single domain  — OR —
+  hosts: [blog.example.com, www.example.com]  # multiple domains
   app_port: 3000
   ssl: true                     # kamal-proxy handles Let's Encrypt
   health_check_path: /up

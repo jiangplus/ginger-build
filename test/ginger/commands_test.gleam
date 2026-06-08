@@ -22,7 +22,7 @@ fn test_config() -> Config {
       password: "GITHUB_TOKEN",
     ),
     proxy: Some(Proxy(
-      host: "blog.example.com",
+      hosts: ["blog.example.com"],
       app_port: 3000,
       ssl: True,
       health_check_path: "/up",

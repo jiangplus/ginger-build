@@ -33,9 +33,12 @@ pub type Registry {
 }
 
 /// kamal-proxy configuration. Absent → the role is not web-facing.
+/// `hosts` holds one or more virtual-host domain names the proxy routes for
+/// this service. In YAML, either `host: "a.com"` or `hosts: [a.com, b.com]`
+/// is accepted; both normalise to this list.
 pub type Proxy {
   Proxy(
-    host: String,
+    hosts: List(String),
     app_port: Int,
     ssl: Bool,
     health_check_path: String,

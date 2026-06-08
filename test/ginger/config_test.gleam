@@ -62,10 +62,29 @@ proxy:
 pub fn decode_proxy_test() {
   let assert Ok(cfg) = decode.from_string(with_proxy)
   let assert Some(proxy) = cfg.proxy
-  assert proxy.host == "blog.example.com"
+  assert proxy.hosts == ["blog.example.com"]
   assert proxy.app_port == 3000
   assert proxy.ssl == True
   assert proxy.health_check_path == "/up"
+}
+
+const with_proxy_hosts = "
+service: blog
+image: img
+servers:
+  web:
+    hosts: [10.0.0.1]
+registry:
+  server: ghcr.io
+proxy:
+  hosts: [blog.example.com, www.example.com]
+  app_port: 3000
+"
+
+pub fn decode_proxy_hosts_list_test() {
+  let assert Ok(cfg) = decode.from_string(with_proxy_hosts)
+  let assert Some(proxy) = cfg.proxy
+  assert proxy.hosts == ["blog.example.com", "www.example.com"]
 }
 
 const with_rolling = "

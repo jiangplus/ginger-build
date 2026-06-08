@@ -71,10 +71,7 @@ pub fn deploy(
     container_name(config, role.name, version)
     <> ":"
     <> int.to_string(proxy.app_port)
-  let host_args = case proxy.host {
-    "" -> []
-    h -> ["--host", h]
-  }
+  let host_args = list.flat_map(proxy.hosts, fn(h) { ["--host", h] })
   let tls_args = case proxy.ssl {
     True -> ["--tls"]
     False -> []
