@@ -1,0 +1,33 @@
+test/ginger/config_test.gleam
+  s_9232629e5888c0::t_e16ba0628fe1bb 65,71-87
+test/ginger/commands_test.gleam
+  s_9232629e5888c0::t_0be2216d89321d 25
+test/ginger/pipeline_test.gleam
+  s_9232629e5888c0::t_59254520e07c55 21
+src/ginger/config.gleam
+  s_9232629e5888c0::t_d3a4ede66598b0 36-38,41
+README.md
+  s_9232629e5888c0::t_91da6e757aa5e3 69-70
+src/ginger/config/decode.gleam
+  s_9232629e5888c0::t_bf4b91d18df8c4 117,126,138-151
+src/ginger/commands/proxy.gleam
+  s_9232629e5888c0::t_b16b0c0657d3e1 74
+src/ginger/cli.gleam
+  s_9232629e5888c0::t_45c3b6a66b6390 205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "66b803ae1d332901012cbd38cb030b205bb64e34",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
