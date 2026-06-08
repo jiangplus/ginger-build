@@ -14,6 +14,7 @@ pub fn real(ssh_user: String) -> Runner {
     remote: fn(host, cmd) { remote_run(ssh_user, host, cmd) },
     probe: fn(host, cmd) { remote_probe(ssh_user, host, cmd) },
     local: executor.run_local,
+    local_streamed: executor.run_local_streamed,
     local_shell: executor.run_local_string,
   )
 }

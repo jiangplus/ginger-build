@@ -17,6 +17,8 @@ pub type Runner {
     probe: fn(String, Command) -> #(String, Int),
     /// Run a built command on the operator machine.
     local: fn(Command) -> Result(String, GingerError),
+    /// Run a built command locally, streaming output to stdout in real time.
+    local_streamed: fn(Command) -> Result(String, GingerError),
     /// Run a raw shell string on the operator machine (local hooks).
     local_shell: fn(String) -> Result(String, GingerError),
   )

@@ -56,7 +56,7 @@ fn build(context: Context) -> Result(Context, GingerError) {
     },
   )
   use _ <- result.try(
-    context.runner.local(builder.build(config, context.version)),
+    context.runner.local_streamed(builder.build(config, context.version)),
   )
   Ok(context)
 }

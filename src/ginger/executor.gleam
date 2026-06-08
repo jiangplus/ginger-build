@@ -11,6 +11,9 @@ pub const default_timeout = 300_000
 @external(erlang, "env_ffi", "local_exec")
 fn ffi_local_exec(command: String) -> #(String, Int)
 
+@external(erlang, "env_ffi", "local_exec_stream")
+fn ffi_local_exec_stream(command: String) -> #(String, Int)
+
 /// Run a command over an existing SSH session. Non-zero exit → `ExecError`.
 pub fn run(session: Session, cmd: Command) -> Result(String, GingerError) {
   run_with_timeout(session, cmd, default_timeout)
@@ -57,6 +60,21 @@ pub fn probe(session: Session, cmd: Command) -> #(String, Int) {
 /// Run a built command on the operator machine (e.g. `docker buildx build`).
 pub fn run_local(cmd: Command) -> Result(String, GingerError) {
   run_local_string(command.to_string(cmd))
+}
+
+/// Like `run_local` but streams output to stdout as it arrives instead of
+/// capturing it. Used for long-running commands like `docker buildx build`
+/// where the user wants to see progress in real time.
+pub fn run_local_streamed(cmd: Command) -> Result(String, GingerError) {
+  let rendered = command.to_string(cmd)
+  let #(_, exit) = ffi_local_exec_stream(rendered)
+  case exit {
+    0 -> Ok("")
+    _ ->
+      Error(HookFailed(
+        "local command failed (exit " <> int.to_string(exit) <> "): " <> rendered,
+      ))
+  }
 }
 
 /// Run a raw shell string locally (e.g. an inline local hook).

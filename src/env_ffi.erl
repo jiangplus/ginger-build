@@ -1,5 +1,5 @@
 -module(env_ffi).
--export([get_env/0, read_file/1, local_exec/1, git_sha/0]).
+-export([get_env/0, read_file/1, local_exec/1, local_exec_stream/1, git_sha/0]).
 
 %% Return the whole process environment as a list of {Key, Value} binaries.
 get_env() ->
@@ -25,6 +25,27 @@ read_file(Path) ->
 %% stdout/stderr and the exit status. Returns {Output, ExitStatus}.
 local_exec(Cmd) ->
     do_exec(binary_to_list(Cmd)).
+
+%% Like local_exec/1 but streams each output chunk to stdout as it arrives.
+%% Returns {"", ExitStatus} — the output has already been printed.
+local_exec_stream(Cmd) ->
+    do_exec_stream(binary_to_list(Cmd)).
+
+do_exec_stream(Cmd) ->
+    Port = open_port(
+        {spawn_executable, "/bin/sh"},
+        [{args, ["-c", Cmd]}, exit_status, stderr_to_stdout, binary, use_stdio]
+    ),
+    stream_collect(Port).
+
+stream_collect(Port) ->
+    receive
+        {Port, {data, Data}} ->
+            io:put_chars(Data),
+            stream_collect(Port);
+        {Port, {exit_status, Status}} ->
+            {<<"">>, Status}
+    end.
 
 do_exec(Cmd) ->
     Port = open_port(

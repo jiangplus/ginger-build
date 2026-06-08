@@ -62,6 +62,10 @@ fn recording_context(sink: Subject(String), existing_proxy: String) -> Context {
         process.send(sink, "local:" <> command.to_string(cmd))
         Ok("")
       },
+      local_streamed: fn(cmd) {
+        process.send(sink, "local:" <> command.to_string(cmd))
+        Ok("")
+      },
       local_shell: fn(shell) {
         process.send(sink, "shell:" <> shell)
         Ok("")
@@ -139,6 +143,10 @@ pub fn old_container_is_removed_after_successful_boot_test() {
       },
       probe: probe,
       local: fn(cmd) {
+        process.send(sink, "local:" <> command.to_string(cmd))
+        Ok("")
+      },
+      local_streamed: fn(cmd) {
         process.send(sink, "local:" <> command.to_string(cmd))
         Ok("")
       },
