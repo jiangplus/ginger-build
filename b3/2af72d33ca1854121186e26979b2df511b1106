@@ -1,0 +1,26 @@
+ginger.yml
+  s_9232629e5888c0::t_e54b6b8205269a 18
+README.md
+  s_9232629e5888c0::t_ba35d273dd6bab 69
+  s_9232629e5888c0::t_06eb5fdc69a8e6 142
+src/ginger/cli.gleam
+  s_9232629e5888c0::t_10cb780e1526b1 25
+gleam.toml
+  s_9232629e5888c0::t_2895673441d312 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "b32af72d33ca1854121186e26979b2df511b1106",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
