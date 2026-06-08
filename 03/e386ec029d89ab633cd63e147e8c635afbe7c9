@@ -1,0 +1,32 @@
+src/ginger/pipeline.gleam
+  s_9232629e5888c0::t_04a26730da426d 59
+src/ginger/context.gleam
+  s_9232629e5888c0::t_7b377ae33c51d8 20-21
+src/ginger/runner.gleam
+  s_9232629e5888c0::t_0ab08154a482c4 17
+test/ginger/pipeline_test.gleam
+  s_9232629e5888c0::t_e7403d22e2ed6c 65-68
+  s_9232629e5888c0::t_e26caa31ea36c4 149-152
+src/env_ffi.erl
+  s_9232629e5888c0::t_671a85fe6f9628 29-49
+  s_9232629e5888c0::t_f3e19811bd87ab 2
+src/ginger/executor.gleam
+  s_9232629e5888c0::t_4686ffe7e1488b 14-16
+  s_9232629e5888c0::t_eb24614315f67f 65-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "03e386ec029d89ab633cd63e147e8c635afbe7c9",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
