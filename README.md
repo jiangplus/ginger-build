@@ -66,7 +66,7 @@ registry:
   password: GITHUB_TOKEN        # key name resolved from the secret map at deploy time
 
 proxy:
-  hosts: [blog.example.com]     # one or more virtual-host domains
+  hosts: [blog.example.com, www.example.com]  # one or more virtual-host domains
   app_port: 3000
   ssl: true                     # kamal-proxy handles Let's Encrypt
   health_check_path: /up
@@ -115,7 +115,7 @@ pipelines:
 
 | Step | Description |
 |------|-------------|
-| `build` | `docker buildx build --push` locally or on a remote builder over SSH |
+| `build` | `docker buildx build --push` locally or on a remote builder over SSH; output streams live |
 | `push` | No-op when buildx already pushed; explicit for clarity |
 | `boot-proxy` | Ensure a proxy is running; reuses an existing kamal-proxy if present |
 | `boot-app` | Zero-downtime container swap; options: `rolling: bool`, `version: string` |
