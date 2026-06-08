@@ -66,8 +66,7 @@ registry:
   password: GITHUB_TOKEN        # key name resolved from the secret map at deploy time
 
 proxy:
-  host: blog.example.com        # single domain  — OR —
-  hosts: [blog.example.com, www.example.com]  # multiple domains
+  hosts: [blog.example.com]     # one or more virtual-host domains
   app_port: 3000
   ssl: true                     # kamal-proxy handles Let's Encrypt
   health_check_path: /up
@@ -140,7 +139,7 @@ ginger detects any running `kamal-proxy` container on the host and registers the
 
 ```sh
 gleam run -- <command>        # run without installing
-gleam test                    # run the test suite (72 tests)
+gleam test                    # run the test suite (73 tests)
 gleam format src test         # format
 just build                    # gleam build
 just escript                  # gleam export escript → ./ginger (single-file binary)

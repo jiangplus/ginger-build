@@ -15,7 +15,7 @@ registry:
   password: GITHUB_TOKEN
 
 proxy:
-  host: blog.example.com
+  hosts: [blog.example.com]
   app_port: 3000
   ssl: true
   health_check_path: /up
