@@ -11,13 +11,88 @@
 
 ## 安装
 
+### 第一步：安装 Erlang/OTP
+
+ginger 打包为单文件 escript，运行时只依赖 Erlang/OTP 27 或更高版本。
+
+#### macOS
+
 ```sh
-just install   # 构建单文件 escript，复制到 ~/bin/ginger
+brew install erlang
 ```
 
-依赖：目标机器上需安装 Erlang/OTP。`just` 参见 [just.systems](https://just.systems)。
+验证：
 
-生成的 `ginger` escript 是独立可执行文件，复制到任何装有 Erlang 的机器即可运行，无需其他文件。
+```sh
+erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+# 输出示例："29"
+```
+
+#### Ubuntu / Debian
+
+推荐使用 [Erlang Solutions](https://www.erlang-solutions.com/downloads/) 提供的官方包，版本最新且与系统包不冲突：
+
+```sh
+# 添加 Erlang Solutions 仓库
+wget -qO- https://packages.erlang-solutions.com/ubuntu/erlang_solutions.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/erlang-solutions.gpg
+echo "deb [signed-by=/usr/share/keyrings/erlang-solutions.gpg] \
+  https://packages.erlang-solutions.com/ubuntu $(lsb_release -cs) contrib" \
+  | sudo tee /etc/apt/sources.list.d/erlang-solutions.list
+
+# 安装
+sudo apt update
+sudo apt install -y esl-erlang
+```
+
+或使用系统自带包（版本可能较旧，OTP 24+ 即可）：
+
+```sh
+sudo apt install -y erlang
+```
+
+验证：
+
+```sh
+erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+```
+
+#### Windows
+
+从 [Erlang/OTP 官网](https://www.erlang.org/downloads) 下载 `.exe` 安装包，按向导完成安装。安装完成后在命令提示符（CMD）或 PowerShell 中验证：
+
+```powershell
+erl -eval "erlang:display(erlang:system_info(otp_release)), halt()." -noshell
+```
+
+> **注意**：Windows 上 ginger escript 需要在 WSL2 或 Git Bash 环境中运行，原生 CMD/PowerShell 暂不支持 SSH 功能。推荐使用 WSL2（Ubuntu）并按上文 Ubuntu 步骤安装 Erlang。
+
+### 第二步：安装 ginger
+
+从 [Releases](https://github.com/jiangplus/ginger/releases) 页面下载最新的 `ginger` escript 文件，放到 PATH 中的任意目录：
+
+```sh
+# macOS / Linux
+curl -fsSL https://github.com/jiangplus/ginger/releases/latest/download/ginger \
+  -o ~/.local/bin/ginger
+chmod +x ~/.local/bin/ginger
+ginger version
+```
+
+或者从源码构建（需安装 [Gleam](https://gleam.run/getting-started/installing/) 和 [just](https://just.systems)）：
+
+```sh
+git clone https://github.com/jiangplus/ginger.git
+cd ginger
+just install   # 构建 escript 并复制到 ~/bin/ginger
+```
+
+验证安装：
+
+```sh
+ginger version
+# ginger 0.1.6
+```
 
 ## 命令
 

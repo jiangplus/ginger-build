@@ -13,13 +13,60 @@ Compared to Kamal, ginger makes four deliberate choices:
 
 ## Install
 
+### Step 1 — Install Erlang/OTP
+
+ginger ships as a single-file escript. The only runtime dependency is Erlang/OTP 27 or later.
+
+**macOS**
+
 ```sh
-just install   # builds a single-file escript and copies it to ~/bin/ginger
+brew install erlang
 ```
 
-Requires Erlang/OTP on the machine. `just` available from [just.systems](https://just.systems).
+**Ubuntu / Debian**
 
-You can also copy the generated `ginger` escript to any host that has Erlang installed — no other files needed.
+```sh
+# Erlang Solutions repo (recommended — always up to date)
+wget -qO- https://packages.erlang-solutions.com/ubuntu/erlang_solutions.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/erlang-solutions.gpg
+echo "deb [signed-by=/usr/share/keyrings/erlang-solutions.gpg] \
+  https://packages.erlang-solutions.com/ubuntu $(lsb_release -cs) contrib" \
+  | sudo tee /etc/apt/sources.list.d/erlang-solutions.list
+sudo apt update && sudo apt install -y esl-erlang
+
+# Or the system package (OTP 24+ is fine):
+# sudo apt install -y erlang
+```
+
+**Windows**
+
+Download and run the `.exe` installer from [erlang.org/downloads](https://www.erlang.org/downloads). ginger requires WSL2 (Ubuntu) for SSH — install Erlang inside WSL2 using the Ubuntu steps above and run ginger from there.
+
+Verify on any platform:
+
+```sh
+erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+# prints e.g. "29"
+```
+
+### Step 2 — Install ginger
+
+Download the latest `ginger` escript from [Releases](https://github.com/jiangplus/ginger/releases) and put it on your PATH:
+
+```sh
+curl -fsSL https://github.com/jiangplus/ginger/releases/latest/download/ginger \
+  -o ~/.local/bin/ginger
+chmod +x ~/.local/bin/ginger
+ginger version
+```
+
+Or build from source (requires [Gleam](https://gleam.run/getting-started/installing/) and [just](https://just.systems)):
+
+```sh
+git clone https://github.com/jiangplus/ginger.git
+cd ginger
+just install   # builds escript and copies it to ~/bin/ginger
+```
 
 ## Commands
 
