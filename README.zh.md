@@ -13,59 +13,46 @@
 
 ### 第一步：安装 Erlang/OTP
 
-ginger 打包为单文件 escript，运行时只依赖 Erlang/OTP 27 或更高版本。
+ginger 打包为单文件 escript，运行时只依赖 **Erlang/OTP 27 或更高版本**。Ubuntu/Debian 系统自带的 `erlang` 包通常是 OTP 24 或更旧，请勿直接使用，改用 Erlang Solutions 官方源。
 
 #### macOS
 
 ```sh
-brew install erlang
+brew install erlang        # 安装 OTP 27+
 ```
 
 验证：
 
 ```sh
 erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
-# 输出示例："29"
+# 必须输出 "27"、"28" 或 "29"
 ```
 
 #### Ubuntu / Debian
 
-推荐使用 [Erlang Solutions](https://www.erlang-solutions.com/downloads/) 提供的官方包，版本最新且与系统包不冲突：
+系统 `apt` 自带包版本过旧，必须使用 Erlang Solutions 官方源：
 
 ```sh
-# 添加 Erlang Solutions 仓库
 wget -qO- https://packages.erlang-solutions.com/ubuntu/erlang_solutions.asc \
   | sudo gpg --dearmor -o /usr/share/keyrings/erlang-solutions.gpg
 echo "deb [signed-by=/usr/share/keyrings/erlang-solutions.gpg] \
   https://packages.erlang-solutions.com/ubuntu $(lsb_release -cs) contrib" \
   | sudo tee /etc/apt/sources.list.d/erlang-solutions.list
-
-# 安装
-sudo apt update
-sudo apt install -y esl-erlang
-```
-
-或使用系统自带包（版本可能较旧，OTP 24+ 即可）：
-
-```sh
-sudo apt install -y erlang
+sudo apt update && sudo apt install -y esl-erlang
 ```
 
 验证：
 
 ```sh
 erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+# 必须输出 "27"、"28" 或 "29"
 ```
 
 #### Windows
 
-从 [Erlang/OTP 官网](https://www.erlang.org/downloads) 下载 `.exe` 安装包，按向导完成安装。安装完成后在命令提示符（CMD）或 PowerShell 中验证：
+从 [Erlang/OTP 官网](https://www.erlang.org/downloads) 下载 OTP 27+ 的 `.exe` 安装包，按向导完成安装。
 
-```powershell
-erl -eval "erlang:display(erlang:system_info(otp_release)), halt()." -noshell
-```
-
-> **注意**：Windows 上 ginger escript 需要在 WSL2 或 Git Bash 环境中运行，原生 CMD/PowerShell 暂不支持 SSH 功能。推荐使用 WSL2（Ubuntu）并按上文 Ubuntu 步骤安装 Erlang。
+> **注意**：ginger 的 SSH 功能需要在 WSL2（Ubuntu）环境中运行，原生 CMD/PowerShell 暂不支持。请在 WSL2 内按上文 Ubuntu 步骤安装 Erlang，并在 WSL2 终端中使用 ginger。
 
 ### 第二步：安装 ginger
 

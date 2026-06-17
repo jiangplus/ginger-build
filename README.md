@@ -15,38 +15,36 @@ Compared to Kamal, ginger makes four deliberate choices:
 
 ### Step 1 — Install Erlang/OTP
 
-ginger ships as a single-file escript. The only runtime dependency is Erlang/OTP 27 or later.
+ginger ships as a single-file escript. The only runtime dependency is **Erlang/OTP 27 or later**. The system `erlang` package on Ubuntu/Debian is often OTP 24 or older — use the Erlang Solutions repo instead.
 
 **macOS**
 
 ```sh
-brew install erlang
+brew install erlang        # installs OTP 27+
 ```
 
 **Ubuntu / Debian**
 
+The system `apt` package is too old. Use the Erlang Solutions repo:
+
 ```sh
-# Erlang Solutions repo (recommended — always up to date)
 wget -qO- https://packages.erlang-solutions.com/ubuntu/erlang_solutions.asc \
   | sudo gpg --dearmor -o /usr/share/keyrings/erlang-solutions.gpg
 echo "deb [signed-by=/usr/share/keyrings/erlang-solutions.gpg] \
   https://packages.erlang-solutions.com/ubuntu $(lsb_release -cs) contrib" \
   | sudo tee /etc/apt/sources.list.d/erlang-solutions.list
 sudo apt update && sudo apt install -y esl-erlang
-
-# Or the system package (OTP 24+ is fine):
-# sudo apt install -y erlang
 ```
 
 **Windows**
 
-Download and run the `.exe` installer from [erlang.org/downloads](https://www.erlang.org/downloads). ginger requires WSL2 (Ubuntu) for SSH — install Erlang inside WSL2 using the Ubuntu steps above and run ginger from there.
+Download the OTP 27+ `.exe` installer from [erlang.org/downloads](https://www.erlang.org/downloads). ginger requires WSL2 (Ubuntu) for SSH — install Erlang inside WSL2 using the Ubuntu steps above and run ginger from there.
 
 Verify on any platform:
 
 ```sh
 erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
-# prints e.g. "29"
+# must print "27", "28", or "29"
 ```
 
 ### Step 2 — Install ginger
