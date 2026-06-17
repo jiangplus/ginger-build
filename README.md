@@ -49,10 +49,10 @@ erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
 
 ### Step 2 — Install ginger
 
-Download the latest `ginger` escript from [Releases](https://github.com/jiangplus/ginger/releases) and put it on your PATH:
+Download the latest `ginger` escript from [Releases](https://github.com/jiangplus/ginger-build/releases) and put it on your PATH:
 
 ```sh
-curl -fsSL https://github.com/jiangplus/ginger/releases/latest/download/ginger \
+curl -fsSL https://github.com/jiangplus/ginger-build/releases/latest/download/ginger \
   -o ~/.local/bin/ginger
 chmod +x ~/.local/bin/ginger
 ginger version

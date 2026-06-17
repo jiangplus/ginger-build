@@ -56,11 +56,11 @@ erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
 
 ### 第二步：安装 ginger
 
-从 [Releases](https://github.com/jiangplus/ginger/releases) 页面下载最新的 `ginger` escript 文件，放到 PATH 中的任意目录：
+从 [Releases](https://github.com/jiangplus/ginger-build/releases) 页面下载最新的 `ginger` escript 文件，放到 PATH 中的任意目录：
 
 ```sh
 # macOS / Linux
-curl -fsSL https://github.com/jiangplus/ginger/releases/latest/download/ginger \
+curl -fsSL https://github.com/jiangplus/ginger-build/releases/latest/download/ginger \
   -o ~/.local/bin/ginger
 chmod +x ~/.local/bin/ginger
 ginger version
