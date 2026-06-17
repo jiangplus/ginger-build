@@ -1,0 +1,21 @@
+README.zh.md
+  s_9232629e5888c0::t_14d04547965938 16,21,28,33,41,48,53,55
+README.md
+  s_9232629e5888c0::t_07d29542c1bd11 18,23,28-29,41,47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "83201f5f73c23ef32e7778135915147cd2affd59",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
