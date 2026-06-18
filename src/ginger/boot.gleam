@@ -9,7 +9,8 @@ import ginger/config.{
   TraefikEgress, container_prefix,
 }
 import ginger/context.{type Context, container_env, plain_env, secret_env}
-import ginger/error.{type GingerError, DeployAborted}
+import ginger/error.{type GingerError, DeployAborted, ExecError}
+import gleam/int
 import ginger/rolling
 import ginger/secrets
 import gleam/erlang/process.{type Subject}
@@ -258,7 +259,8 @@ fn boot_host_docker(
 
 /// Nomad path: submit a Nomad job with the Docker driver. Traefik labels are
 /// embedded in the job spec so Traefik auto-discovers the service. Nomad
-/// handles rolling updates and container lifecycle internally.
+/// handles rolling updates and container lifecycle internally. After submission,
+/// ginger polls the deployment status until it is healthy or fails.
 fn boot_host_nomad(
   context: Context,
   role: Role,
@@ -313,10 +315,99 @@ fn boot_host_nomad(
       t_labels,
       app_port,
       registry_auth,
+      config.network,
     ),
   ))
 
-  Ok(context)
+  let timeout = case config.proxy {
+    Some(proxy) -> proxy.deploy_timeout
+    None -> 120
+  }
+
+  wait_nomad_healthy(context, host, config, role, timeout)
+}
+
+/// Poll `nomad job deployments -latest` until the deployment is successful,
+/// failed, or the timeout elapses. Intervals of 3 s keep SSH round-trips low.
+fn wait_nomad_healthy(
+  context: Context,
+  host: String,
+  config: Config,
+  role: Role,
+  timeout_s: Int,
+) -> Result(Context, GingerError) {
+  do_wait_nomad_healthy(context, host, config, role, timeout_s, 0)
+}
+
+fn do_wait_nomad_healthy(
+  context: Context,
+  host: String,
+  config: Config,
+  role: Role,
+  timeout_s: Int,
+  elapsed_s: Int,
+) -> Result(Context, GingerError) {
+  case elapsed_s >= timeout_s {
+    True ->
+      Error(ExecError(
+        host,
+        "nomad job deployments",
+        1,
+        "timed out after "
+          <> int.to_string(timeout_s)
+          <> "s waiting for healthy deployment",
+      ))
+    False -> {
+      let #(output, _) =
+        context.runner.probe(
+          host,
+          nomad_cmd.deployment_status(config, role.name),
+        )
+      case nomad_cmd.parse_deployment_status(output) {
+        "successful" -> {
+          context.log(
+            "Nomad deployment for "
+            <> config.service
+            <> "-"
+            <> role.name
+            <> " is healthy",
+          )
+          Ok(context)
+        }
+        "failed" | "cancelled" ->
+          Error(ExecError(
+            host,
+            "nomad job deployments",
+            1,
+            "Nomad deployment failed; run `nomad job status "
+              <> config.service
+              <> "-"
+              <> role.name
+              <> "` to inspect",
+          ))
+        status -> {
+          context.log(
+            "Nomad deployment status: "
+            <> status
+            <> " ("
+            <> int.to_string(elapsed_s)
+            <> "/"
+            <> int.to_string(timeout_s)
+            <> "s elapsed)...",
+          )
+          process.sleep(3000)
+          do_wait_nomad_healthy(
+            context,
+            host,
+            config,
+            role,
+            timeout_s,
+            elapsed_s + 3,
+          )
+        }
+      }
+    }
+  }
 }
 
 /// Traefik routing labels for a role, or empty list when egress is kamal-proxy
@@ -345,6 +436,13 @@ fn ensure_kamal_proxy(
   context: Context,
   host: String,
 ) -> Result(String, GingerError) {
+  let network = context.config.network
+  // Always ensure the network exists — even when reusing an existing proxy —
+  // so the Nomad job can join it regardless of how Traefik was provisioned.
+  use _ <- result.try(context.runner.remote(
+    host,
+    proxy_cmd.ensure_network(network),
+  ))
   case detect_kamal_proxy(context, host) {
     Some(name) -> {
       context.log("Reusing existing proxy '" <> name <> "' on " <> host)
@@ -354,10 +452,6 @@ fn ensure_kamal_proxy(
       context.log(
         "No proxy on " <> host <> "; booting " <> proxy_cmd.container <> "...",
       )
-      use _ <- result.try(context.runner.remote(
-        host,
-        proxy_cmd.ensure_network(app.network),
-      ))
       use _ <- result.try(context.runner.remote(host, proxy_cmd.start_or_run()))
       Ok(proxy_cmd.container)
     }
@@ -368,6 +462,13 @@ fn ensure_traefik(
   context: Context,
   host: String,
 ) -> Result(String, GingerError) {
+  let network = context.config.network
+  // Always ensure the network exists so Nomad containers can join it even when
+  // an external Traefik (not booted by ginger) is detected and reused.
+  use _ <- result.try(context.runner.remote(
+    host,
+    proxy_cmd.ensure_network(network),
+  ))
   case detect_traefik(context, host) {
     Some(name) -> {
       context.log("Reusing existing Traefik '" <> name <> "' on " <> host)
@@ -381,12 +482,8 @@ fn ensure_traefik(
         <> traefik_cmd.container
         <> "...",
       )
-      use _ <- result.try(context.runner.remote(
-        host,
-        proxy_cmd.ensure_network(app.network),
-      ))
       use _ <- result.try(
-        context.runner.remote(host, traefik_cmd.start_or_run()),
+        context.runner.remote(host, traefik_cmd.start_or_run(network)),
       )
       Ok(traefik_cmd.container)
     }

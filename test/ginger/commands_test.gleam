@@ -38,6 +38,7 @@ fn test_config() -> Config {
     pipelines: [],
     runtime: DockerRuntime,
     egress: KamalProxyEgress,
+    network: "ginger",
   )
 }
 

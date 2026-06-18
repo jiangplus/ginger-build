@@ -35,6 +35,7 @@ fn test_config() -> Config {
     pipelines: [],
     runtime: DockerRuntime,
     egress: KamalProxyEgress,
+    network: "ginger",
   )
 }
 
@@ -221,8 +222,8 @@ pub fn deploy_reuses_existing_proxy_test() {
   let assert Ok(_) = pipeline.run(ctx, pl)
   let commands = drain(sink, [])
 
-  // build, write-env-file, app-run, rm-env-file, proxy-deploy, prune
-  let assert [build, env_write, app, _env_rm, deploy, prune] = commands
+  // build, ensure-network, write-env-file, app-run, rm-env-file, proxy-deploy, prune
+  let assert [build, _net, env_write, app, _env_rm, deploy, prune] = commands
   assert string.starts_with(build, "local:docker buildx build --push")
   assert string.contains(env_write, "GINGER_ENV_EOF")
   assert string.contains(app, "docker run --detach")

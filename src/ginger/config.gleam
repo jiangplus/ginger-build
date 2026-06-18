@@ -37,6 +37,7 @@ pub type Config {
     pipelines: List(Pipeline),
     runtime: RuntimeBackend,
     egress: EgressBackend,
+    network: String,
   )
 }
 

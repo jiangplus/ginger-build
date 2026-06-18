@@ -38,6 +38,8 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
   let ssh_user = decode_ssh_user(root)
   use pipelines <- result.try(decode_pipelines(root))
   use #(runtime, egress) <- result.try(decode_runtime_egress(root))
+  let network =
+    optional_string_node(root, "network") |> option.unwrap("ginger")
 
   Ok(Config(
     service: service,
@@ -54,6 +56,7 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
     pipelines: pipelines,
     runtime: runtime,
     egress: egress,
+    network: network,
   ))
 }
 

@@ -28,7 +28,8 @@ pub fn network_of(name: String) -> Command {
 
 /// `docker run` ginger's own Traefik, publishing 80/443 and mounting the Docker
 /// socket. Only used when no Traefik is already running on the host.
-pub fn run() -> Command {
+/// The container joins `network` so it can reach app containers on that network.
+pub fn run(network: String) -> Command {
   command.docker([
     "run",
     "--name",
@@ -36,6 +37,8 @@ pub fn run() -> Command {
     "--detach",
     "--restart",
     "unless-stopped",
+    "--network",
+    network,
     "--publish",
     "80:80",
     "--publish",
@@ -47,6 +50,7 @@ pub fn run() -> Command {
     image,
     "--providers.docker=true",
     "--providers.docker.exposedbydefault=false",
+    "--providers.docker.network=" <> network,
     "--entrypoints.web.address=:80",
     "--entrypoints.websecure.address=:443",
     "--certificatesresolvers.letsencrypt.acme.httpchallenge=true",
@@ -61,8 +65,8 @@ pub fn start() -> Command {
 }
 
 /// Start ginger's own Traefik if it exists, otherwise create it: `start || run`.
-pub fn start_or_run() -> Command {
-  command.or([start(), run()])
+pub fn start_or_run(network: String) -> Command {
+  command.or([start(), run(network)])
 }
 
 /// Traefik routing labels for a Docker container. Traefik auto-discovers
