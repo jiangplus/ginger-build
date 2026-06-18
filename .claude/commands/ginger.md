@@ -60,7 +60,7 @@ Download the pre-built escript and make it executable:
 curl -fsSL https://github.com/jiangplus/ginger-build/releases/latest/download/ginger \
   -o ~/.local/bin/ginger
 chmod +x ~/.local/bin/ginger
-ginger version   # should print: ginger 0.2.1
+ginger version   # should print: ginger 0.2.2
 ```
 
 Make sure `~/.local/bin` is on your PATH (add to `~/.bashrc` / `~/.zshrc` / `config.fish`
