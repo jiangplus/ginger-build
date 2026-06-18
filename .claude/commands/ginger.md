@@ -12,8 +12,10 @@ description: >
 # ginger deployment skill
 
 ginger is a single-binary deployment tool (Gleam/OTP escript) that builds a Docker
-image, pushes it to a registry, and rolls it out over SSH with zero downtime via
-kamal-proxy. Think Kamal, but written in Gleam.
+image, pushes it to a registry, and rolls it out over SSH with zero downtime.
+
+Default stack: **Nomad** (container scheduling) + **Traefik** (traffic routing).
+Alternative: **Docker** + **kamal-proxy** — two YAML lines to switch.
 
 Release page: https://github.com/jiangplus/ginger-build/releases
 
@@ -58,7 +60,7 @@ Download the pre-built escript and make it executable:
 curl -fsSL https://github.com/jiangplus/ginger-build/releases/latest/download/ginger \
   -o ~/.local/bin/ginger
 chmod +x ~/.local/bin/ginger
-ginger version   # should print: ginger 0.1.6
+ginger version   # should print: ginger 0.2.0
 ```
 
 Make sure `~/.local/bin` is on your PATH (add to `~/.bashrc` / `~/.zshrc` / `config.fish`
@@ -68,11 +70,20 @@ if needed).
 
 ## Step 3 — Create `ginger.yml`
 
-Run this in the project root. Ask the user for their values and fill in the template:
+Ask the user which stack they want, then fill in the matching template.
+
+### Nomad + Traefik (default)
+
+ginger submits a Nomad job; Traefik auto-discovers it via Docker labels. No Traefik
+registration step needed — start the container and routing begins automatically.
 
 ```yaml
 service: myapp                        # container name prefix [a-z0-9_-]
-image: ghcr.io/myorg/myapp            # image name (tag = version, auto-set to git SHA)
+image: ghcr.io/myorg/myapp            # image name (tag = git SHA by default)
+
+# runner: nomad and egress: traefik are the defaults — you can omit these two lines
+runner: nomad
+egress: traefik
 
 servers:
   web:
@@ -80,30 +91,74 @@ servers:
     primary: true
 
 registry:
-  server: ghcr.io                     # or docker.io, registry.example.com
+  server: ghcr.io
   username: myorg
-  password: GITHUB_TOKEN              # name of the env var / .env key holding the password
+  password: GITHUB_TOKEN              # name of the env var / .env key
 
 proxy:
-  hosts: [myapp.example.com]          # domain(s) kamal-proxy will route to this service
+  hosts: [myapp.example.com]          # domain(s) Traefik will route to this service
   app_port: 3000                      # port the container listens on
-  ssl: true                           # kamal-proxy handles Let's Encrypt automatically
+  ssl: true                           # Traefik handles Let's Encrypt automatically
   health_check_path: /up
 
 ssh:
-  user: root                          # default: root
+  user: root
 
-env:                                  # plain (non-secret) container env vars
+env:
   NODE_ENV: production
 
 secrets:
-  load: [.env]                        # dotenv files to merge with process env
-  inject:                             # keys forwarded to the container via --env-file
+  load: [.env]
+  inject:
+    - GITHUB_TOKEN
+    - "DATABASE_*"
+```
+
+### Docker + kamal-proxy
+
+ginger SSHes directly to each host, runs `docker run`, registers with kamal-proxy,
+then stops the old container.
+
+```yaml
+service: myapp
+image: ghcr.io/myorg/myapp
+
+runner: docker
+egress: kamal-proxy
+
+servers:
+  web:
+    hosts: [10.0.0.1]
+    primary: true
+
+registry:
+  server: ghcr.io
+  username: myorg
+  password: GITHUB_TOKEN
+
+proxy:
+  hosts: [myapp.example.com]
+  app_port: 3000
+  ssl: true                           # kamal-proxy handles Let's Encrypt
+  health_check_path: /up
+  deploy_timeout: 30
+  drain_timeout: 30
+
+ssh:
+  user: root
+
+env:
+  NODE_ENV: production
+
+secrets:
+  load: [.env]
+  inject:
     - GITHUB_TOKEN
     - "DATABASE_*"
 ```
 
 **Key questions to ask the user before filling this in:**
+- Nomad+Traefik or Docker+kamal-proxy?
 - What's the service name and Docker image path?
 - What registry do they use (ghcr.io / Docker Hub / self-hosted)?
 - What are the server IPs and SSH user?
@@ -143,9 +198,12 @@ ginger config          # prints parsed config with secrets redacted
 ginger deploy
 ```
 
-This runs the default pipeline: build image → push to registry → acquire lock →
-boot proxy (or reuse existing kamal-proxy) → zero-downtime container swap → prune
-old containers → release lock.
+Default pipeline: build image → push to registry → acquire lock →
+boot proxy (reuse existing Traefik/kamal-proxy or start a new one) →
+deploy containers → prune → release lock.
+
+- **Nomad**: submits the job spec; Nomad handles the container swap.
+- **Docker**: zero-downtime swap via proxy health check, then removes the old container.
 
 **Useful flags:**
 ```sh
@@ -154,7 +212,7 @@ ginger deploy --tag v1.2.3         # pin a specific image tag instead of git SHA
 ginger redeploy                    # deploy without touching the proxy or pruning
 ginger rollback <version>          # switch traffic back to an older container
 ginger status                      # show running version and proxy state per host
-ginger remove                      # deregister from proxy and delete all containers
+ginger remove                      # stop all containers / purge Nomad jobs
 ```
 
 ---
@@ -173,8 +231,11 @@ Release it: `ginger lock release`.
 **Build output streams to the terminal** — this is intentional; `docker buildx` progress
 appears live so you can see layer caching hits and push progress in real time.
 
-**kamal-proxy already running** — ginger detects and reuses any existing kamal-proxy on
+**Traefik/kamal-proxy already running** — ginger detects and reuses any existing proxy on
 the host, so other apps served by that proxy are never disrupted.
+
+**"runner: nomad requires egress: traefik"** — the only valid combinations are
+`nomad+traefik` and `docker+kamal-proxy`. Fix the `runner` / `egress` pair.
 
 ---
 
@@ -191,7 +252,7 @@ rolling:
   wait: 5         # seconds between batches
 ```
 
-**Background worker role (no proxy):**
+**Background worker role (no proxy routing):**
 ```yaml
 servers:
   web:

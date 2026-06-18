@@ -6,8 +6,8 @@ import ginger/commands/proxy
 import ginger/commands/prune
 import ginger/commands/registry
 import ginger/config.{
-  type Config, type Role, Builder, Config, Count, Proxy, Registry, Role, Rolling,
-  Secrets,
+  type Config, type Role, Builder, Config, Count, DockerRuntime, KamalProxyEgress,
+  Proxy, Registry, Role, Rolling, Secrets,
 }
 import gleam/option.{None, Some}
 
@@ -36,6 +36,8 @@ fn test_config() -> Config {
     retain_containers: 5,
     ssh_user: "root",
     pipelines: [],
+    runtime: DockerRuntime,
+    egress: KamalProxyEgress,
   )
 }
 
@@ -75,6 +77,7 @@ pub fn app_run_test() {
       [#("RAILS_ENV", "production")],
       "/tmp/.ginger-blog-web-abc1234.env",
       "ginger",
+      [],
     )
   assert command.to_string(cmd)
     == "docker run --detach --restart unless-stopped --name blog-web-abc1234 --network ginger"
@@ -102,6 +105,7 @@ pub fn app_run_with_cmd_test() {
       [],
       "/tmp/ef",
       "kamal",
+      [],
     )
   assert command.to_string(cmd)
     == "docker run --detach --restart unless-stopped --name blog-worker-abc1234 --network kamal"

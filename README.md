@@ -2,14 +2,16 @@
 
 Deploy containers anywhere, in Gleam. A [Kamal](https://kamal-deploy.org)-class
 deployment tool: build an image, push it to a registry, and roll it out across
-your servers over SSH with zero downtime via [kamal-proxy](https://github.com/basecamp/kamal-proxy).
+your servers over SSH with zero downtime. Traffic routing is handled by
+[Traefik](https://traefik.io) (default) or [kamal-proxy](https://github.com/basecamp/kamal-proxy);
+container scheduling by [Nomad](https://www.nomadproject.io) (default) or plain Docker.
 
 Compared to Kamal, ginger makes four deliberate choices:
 
-1. **kamal-proxy** for zero-downtime traffic switching — reuses an already-running proxy on the host rather than booting a second one.
+1. **Pluggable runner and egress** — default stack is Nomad + Traefik; switch to Docker + kamal-proxy with two lines in `ginger.yml`. Only these two combinations are supported.
 2. **Rolling updates** across multiple hosts and roles.
 3. **Explicit actions in YAML** — deploy/redeploy/rollback/remove sequences are declared as named *pipelines* of built-in steps, not hardcoded.
-4. **Inline hooks** (shell strings in the YAML, no `hooks/` directory) and **auto-env secrets** (merge the process environment with `.env`, inject by name or glob — secrets written to a tmpfile so they never appear in `docker run` process args).
+4. **Inline hooks** (shell strings in the YAML, no `hooks/` directory) and **auto-env secrets** (merge the process environment with `.env`, inject by name or glob — secrets written to a tmpfile so they never appear in process args).
 
 ## Install
 
@@ -97,6 +99,10 @@ Global options:
 service: blog                   # container name prefix; must be [a-z0-9_-]+
 image: ghcr.io/acme/blog        # image name without tag (tag = version)
 
+runner: nomad                   # nomad (default) | docker
+egress: traefik                 # traefik (default) | kamal-proxy
+                                # valid combinations: nomad+traefik, docker+kamal-proxy
+
 servers:
   web:
     hosts: [10.0.0.1, 10.0.0.2, 10.0.0.3]
@@ -113,10 +119,10 @@ registry:
 proxy:
   hosts: [blog.example.com, www.example.com]  # one or more virtual-host domains
   app_port: 3000
-  ssl: true                     # kamal-proxy handles Let's Encrypt
+  ssl: true                     # TLS via Let's Encrypt (handled by Traefik or kamal-proxy)
   health_check_path: /up
-  deploy_timeout: 30            # seconds kamal-proxy waits for health
-  drain_timeout: 30
+  deploy_timeout: 30            # seconds the proxy waits for health (kamal-proxy only)
+  drain_timeout: 30             # seconds to drain connections before cutover (kamal-proxy only)
 
 ssh:
   user: root                    # default: root
@@ -130,7 +136,7 @@ env:                            # plain env vars baked into every container
 
 secrets:
   load: [.env]                  # dotenv files merged over the process env
-  inject:                       # keys/globs forwarded as --env-file to docker run
+  inject:                       # keys/globs forwarded to the container as env vars
     - RAILS_MASTER_KEY
     - "STRIPE_*"
 
@@ -156,35 +162,83 @@ pipelines:
     - hook: { run: 'echo done >> /var/log/deploys', local: false }
 ```
 
+### Runner and egress backends
+
+ginger supports two deployment stacks selected by the `runner` and `egress` fields.
+Only these combinations are valid — mixing them is a config error.
+
+| `runner` | `egress` | Container scheduling | Traffic routing |
+|----------|----------|----------------------|-----------------|
+| `nomad` (default) | `traefik` (default) | Nomad job via `nomad job run` | Traefik Docker provider (label-based auto-discovery) |
+| `docker` | `kamal-proxy` | `docker run` over SSH | kamal-proxy (explicit register/deregister) |
+
+**Nomad + Traefik** (default): ginger submits a Nomad job spec containing the Docker
+image and Traefik routing labels. Nomad schedules and manages the container; Traefik
+detects it automatically via the Docker provider and begins routing traffic. Nomad
+handles rolling updates and restarts internally — ginger does not explicitly stop the
+old container.
+
+**Docker + kamal-proxy**: ginger SSHes to each host, runs `docker run` directly,
+then calls `kamal-proxy deploy` to perform a health-gated traffic switch, and finally
+stops and removes the old container.
+
 ### Pipeline steps
 
 | Step | Description |
 |------|-------------|
 | `build` | `docker buildx build --push` locally or on a remote builder over SSH; output streams live |
 | `push` | No-op when buildx already pushed; explicit for clarity |
-| `boot-proxy` | Ensure a proxy is running; reuses an existing kamal-proxy if present |
-| `boot-app` | Zero-downtime container swap; options: `rolling: bool`, `version: string` |
-| `remove-app` | Deregister from proxy, stop and remove all service containers |
-| `prune` | Remove old stopped containers and dangling images |
+| `boot-proxy` | Ensure the egress proxy is running; reuses an existing Traefik or kamal-proxy if present |
+| `boot-app` | Deploy containers: Nomad job submit (nomad) or zero-downtime Docker swap (docker) |
+| `remove-app` | Stop and remove all service containers; deregister from proxy if using kamal-proxy |
+| `prune` | Docker: remove old stopped containers and dangling images. Nomad: `nomad system gc` |
 | `lock: acquire\|release\|status` | Mkdir-based deploy mutex on the primary host |
 | `hook: <cmd>` | Inline shell; `local: true` = operator machine, `local: false` = each host |
 | `healthcheck` | (reserved) |
 
 ### Secrets
 
-ginger merges the process environment with each file in `secrets.load` (default `[.env]`). At deploy time it validates that every exact-name key in `secrets.inject` is present and non-empty, then writes the resolved values to a per-container tmpfile (`/tmp/.ginger-<service>-<role>-<version>.env`) and passes `--env-file` to `docker run` — secret values never appear in process args or `ps` output.
+ginger merges the process environment with each file in `secrets.load` (default `[.env]`). At deploy time it validates that every exact-name key in `secrets.inject` is present and non-empty.
+
+- **Docker runner**: resolved values are written to a per-container tmpfile and passed as `--env-file` to `docker run` — secret values never appear in process args or `ps` output.
+- **Nomad runner**: env vars are embedded in the Nomad job spec's `Env` map, which Nomad passes to the container at allocation time.
 
 `registry.password` and any bare key name in the config resolve from the same merged map.
 
-### Proxy reuse
+### Egress proxy reuse
 
-ginger detects any running `kamal-proxy` container on the host and registers the new service against it, joining its Docker network automatically. A second proxy is only booted when none exists. Other apps registered with the shared proxy are never touched.
+On each deploy ginger checks for a running Traefik or kamal-proxy container before
+booting a new one:
+
+- **Traefik**: any container whose image tag contains `traefik` is reused. The new
+  container's labels are picked up automatically.
+- **kamal-proxy**: any container whose image tag contains `kamal-proxy` is reused.
+  ginger joins its Docker network and registers against it. Other apps registered with
+  the shared proxy are never touched.
+
+### Multi-domain routing
+
+`proxy.hosts` accepts a list of domain names. Each domain is routed to the same service:
+
+```yaml
+proxy:
+  hosts: [blog.example.com, www.example.com]
+  app_port: 3000
+```
+
+The scalar shorthand still works for a single domain:
+
+```yaml
+proxy:
+  host: blog.example.com
+  app_port: 3000
+```
 
 ## Development
 
 ```sh
 gleam run -- <command>        # run without installing
-gleam test                    # run the test suite (73 tests)
+gleam test                    # run the test suite (76 tests)
 gleam format src test         # format
 just build                    # gleam build
 just escript                  # gleam export escript → ./ginger (single-file binary)

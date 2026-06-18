@@ -1,7 +1,8 @@
 import ginger/command
 import ginger/config.{
-  type Config, BootApp, BootProxy, Build, Builder, Config, Count, Proxy, Prune,
-  Registry, Role, Rolling, Secrets,
+  type Config, BootApp, BootProxy, Build, Builder, Config, Count,
+  DockerRuntime, KamalProxyEgress, Proxy, Prune, Registry, Role, Rolling,
+  Secrets,
 }
 import ginger/context.{type Context, Context, Runner}
 import ginger/pipeline
@@ -32,6 +33,8 @@ fn test_config() -> Config {
     retain_containers: 5,
     ssh_user: "root",
     pipelines: [],
+    runtime: DockerRuntime,
+    egress: KamalProxyEgress,
   )
 }
 
@@ -156,7 +159,7 @@ pub fn old_container_is_removed_after_successful_boot_test() {
       },
     )
   let ctx =
-    context.Context(
+    Context(
       config: test_config(),
       version: "v1",
       secrets: dict.new(),

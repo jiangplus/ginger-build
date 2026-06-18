@@ -1,10 +1,10 @@
 # ginger
 
-用 Gleam 编写的容器部署工具，运行在 Erlang/BEAM 上。对标 [Kamal](https://kamal-deploy.org)：构建镜像、推送到镜像仓库，通过 SSH 零停机滚动部署到服务器，流量切换由 [kamal-proxy](https://github.com/basecamp/kamal-proxy) 完成。
+用 Gleam 编写的容器部署工具，运行在 Erlang/BEAM 上。对标 [Kamal](https://kamal-deploy.org)：构建镜像、推送到镜像仓库，通过 SSH 零停机滚动部署到服务器。流量路由由 [Traefik](https://traefik.io)（默认）或 [kamal-proxy](https://github.com/basecamp/kamal-proxy) 负责；容器调度由 [Nomad](https://www.nomadproject.io)（默认）或原生 Docker 负责。
 
 与 Kamal 相比，ginger 做了四项有意为之的设计选择：
 
-1. **复用 kamal-proxy** — 检测宿主机上已运行的代理并共享，而不是另起一个。
+1. **可插拔的运行时与出口代理** — 默认组合为 Nomad + Traefik；在 `ginger.yml` 中写两行即可切换到 Docker + kamal-proxy。仅支持这两种组合。
 2. **多主机滚动更新** — 按批次逐步部署，可配置批大小和批间等待时间。
 3. **YAML 显式流水线** — 部署、重部署、回滚、移除等操作序列在 YAML 中声明为命名 *pipeline*，而非硬编码逻辑。
 4. **内联 hook** + **自动注入密钥** — hook 是 YAML 里的 shell 字符串；密钥从进程环境和 `.env` 合并，写入临时文件后以 `--env-file` 传给容器，不会出现在进程参数中。
@@ -78,7 +78,7 @@ just install   # 构建 escript 并复制到 ~/bin/ginger
 
 ```sh
 ginger version
-# ginger 0.1.6
+# ginger 0.2.0
 ```
 
 ## 命令
@@ -112,6 +112,10 @@ ginger help
 service: blog                   # 容器名前缀，只能包含 [a-z0-9_-]
 image: ghcr.io/acme/blog        # 镜像名（不含标签，标签 = 版本号）
 
+runner: nomad                   # nomad（默认）| docker
+egress: traefik                 # traefik（默认）| kamal-proxy
+                                # 有效组合：nomad+traefik，docker+kamal-proxy
+
 servers:
   web:
     hosts: [10.0.0.1, 10.0.0.2, 10.0.0.3]
@@ -128,10 +132,10 @@ registry:
 proxy:
   hosts: [blog.example.com, www.example.com]  # 一个或多个虚拟主机域名
   app_port: 3000
-  ssl: true                     # 由 kamal-proxy 处理 Let's Encrypt 证书
+  ssl: true                     # TLS 证书由 Traefik 或 kamal-proxy 自动申请
   health_check_path: /up
-  deploy_timeout: 30            # kamal-proxy 等待健康检查的秒数
-  drain_timeout: 30
+  deploy_timeout: 30            # 代理等待健康检查的秒数（仅 kamal-proxy）
+  drain_timeout: 30             # 切流前排空连接的秒数（仅 kamal-proxy）
 
 ssh:
   user: root                    # 默认：root
@@ -145,7 +149,7 @@ env:                            # 写入每个容器的普通环境变量
 
 secrets:
   load: [.env]                  # 合并到进程环境的 dotenv 文件列表
-  inject:                       # 以 --env-file 注入容器的键名或通配符
+  inject:                       # 注入容器的键名或通配符
     - RAILS_MASTER_KEY
     - "STRIPE_*"
 
@@ -171,33 +175,52 @@ pipelines:
     - hook: { run: 'echo done >> /var/log/deploys', local: false }
 ```
 
+### 运行时与出口代理
+
+`runner` 和 `egress` 字段决定部署栈，仅支持以下两种组合，混用会报配置错误：
+
+| `runner` | `egress` | 容器调度方式 | 流量路由方式 |
+|----------|----------|-------------|-------------|
+| `nomad`（默认） | `traefik`（默认） | 通过 `nomad job run` 提交 Nomad job | Traefik Docker provider 基于标签自动发现 |
+| `docker` | `kamal-proxy` | SSH 直接执行 `docker run` | kamal-proxy 显式注册/注销 |
+
+**Nomad + Traefik**（默认）：ginger 生成包含 Docker 镜像和 Traefik 路由标签的 Nomad job spec，提交给 Nomad 调度。Nomad 管理容器生命周期；Traefik 通过 Docker provider 自动发现新容器并开始路由。滚动更新和重启由 Nomad 内部处理，ginger 无需显式停止旧容器。
+
+**Docker + kamal-proxy**：ginger SSH 登录每台主机，直接执行 `docker run`，随后调用 `kamal-proxy deploy` 完成健康检查守护的流量切换，最后停止并删除旧容器。
+
 ### 流水线步骤
 
 | 步骤 | 说明 |
 |------|------|
 | `build` | 本机或远程构建器执行 `docker buildx build --push`；构建日志实时输出 |
 | `push` | buildx 已推送时为空操作；显式声明以提高可读性 |
-| `boot-proxy` | 确保代理运行；检测到已有 kamal-proxy 则复用 |
-| `boot-app` | 零停机容器切换；选项：`rolling: bool`、`version: string` |
-| `remove-app` | 从代理注销，停止并删除所有服务容器 |
-| `prune` | 删除旧的已停止容器和悬空镜像 |
+| `boot-proxy` | 确保出口代理运行；检测到已有 Traefik 或 kamal-proxy 则复用 |
+| `boot-app` | 部署容器：Nomad job 提交（nomad）或零停机 Docker 切换（docker） |
+| `remove-app` | 停止并删除所有服务容器；kamal-proxy 模式下同时注销路由 |
+| `prune` | Docker：删除旧的已停止容器和悬空镜像。Nomad：执行 `nomad system gc` |
 | `lock: acquire\|release\|status` | 基于 mkdir 的部署互斥锁，运行在主节点上 |
 | `hook: <命令>` | 内联 shell；`local: true` = 在操作机执行，`local: false` = 在每台主机执行 |
 | `healthcheck` | （预留） |
 
 ### 密钥处理
 
-ginger 将进程环境与 `secrets.load` 中的每个文件（默认 `[.env]`）合并。部署前校验 `secrets.inject` 中所有精确匹配的键存在且非空，然后将解析后的值写入每个容器专属的临时文件（`/tmp/.ginger-<服务>-<角色>-<版本>.env`），以 `--env-file` 传给 `docker run`。密钥值不会出现在进程参数或 `ps` 输出中。
+ginger 将进程环境与 `secrets.load` 中的每个文件（默认 `[.env]`）合并。部署前校验 `secrets.inject` 中所有精确匹配的键存在且非空。
+
+- **Docker 运行时**：解析后的值写入每个容器专属的临时文件（`/tmp/.ginger-<服务>-<角色>-<版本>.env`），以 `--env-file` 传给 `docker run`，不会出现在进程参数或 `ps` 输出中。
+- **Nomad 运行时**：env 变量嵌入 Nomad job spec 的 `Env` 字段，由 Nomad 在分配容器时注入。
 
 `registry.password` 以及配置中的裸键名均从同一合并映射表解析。
 
-### 代理复用
+### 出口代理复用
 
-ginger 检测宿主机上任何正在运行的 `kamal-proxy` 容器，将新服务注册到该代理并自动加入其 Docker 网络。只有在没有代理时才会启动新的 `ginger-proxy`。共享代理上已注册的其他应用不受影响。
+每次部署时，ginger 先检查主机上是否已有运行中的代理，有则复用，无则启动：
 
-### 多域名代理
+- **Traefik**：检测到镜像名含 `traefik` 的容器即复用。新容器的路由标签会被 Traefik 自动感知。
+- **kamal-proxy**：检测到镜像名含 `kamal-proxy` 的容器即复用。ginger 加入其 Docker 网络并向其注册服务，已注册的其他应用不受影响。
 
-`proxy.hosts` 接受域名列表，每个域名对应 kamal-proxy 的一个 `--host` 参数，同一服务可响应多个域名：
+### 多域名路由
+
+`proxy.hosts` 接受域名列表，每个域名均路由到同一服务：
 
 ```yaml
 proxy:
@@ -217,7 +240,7 @@ proxy:
 
 ```sh
 gleam run -- <命令>           # 不安装直接运行
-gleam test                    # 运行测试套件（73 个测试）
+gleam test                    # 运行测试套件（76 个测试）
 gleam format src test         # 格式化代码
 just build                    # gleam build
 just escript                  # gleam export escript → ./ginger（单文件二进制）

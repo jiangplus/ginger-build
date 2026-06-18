@@ -2,12 +2,14 @@ import ginger/boot
 import ginger/commands/app as app_cmd
 import ginger/commands/builder
 import ginger/commands/lock as lock_cmd
+import ginger/commands/nomad as nomad_cmd
 import ginger/commands/proxy as proxy_cmd
 import ginger/commands/prune as prune_cmd
 import ginger/commands/registry as registry_cmd
 import ginger/config.{
-  type Pipeline, type Step, Acquire, BootApp, BootProxy, Build,
-  Healthcheck, Hook, Lock, Prune, Push, Release, RemoveApp, Status,
+  type Pipeline, type Step, Acquire, BootApp, BootProxy, Build, DockerRuntime,
+  Healthcheck, Hook, KamalProxyEgress, Lock, NomadRuntime, Prune, Push, Release,
+  RemoveApp, Status,
 }
 import ginger/context.{type Context}
 import ginger/error.{type GingerError, ConfigError, LockError}
@@ -89,9 +91,21 @@ fn remove_host(
   role: config.Role,
   host: String,
 ) -> Result(Nil, GingerError) {
+  context.log("  " <> role.name <> " on " <> host)
+  case context.config.runtime {
+    DockerRuntime -> remove_host_docker(context, role, host)
+    NomadRuntime -> remove_host_nomad(context, role, host)
+  }
+}
+
+fn remove_host_docker(
+  context: Context,
+  role: config.Role,
+  host: String,
+) -> Result(Nil, GingerError) {
   let #(proxy_container, _) = boot.resolve_proxy_info(context, host)
-  case context.config.proxy {
-    Some(_) -> {
+  case context.config.egress, context.config.proxy {
+    KamalProxyEgress, Some(_) -> {
       let _ =
         context.runner.remote(
           host,
@@ -99,9 +113,8 @@ fn remove_host(
         )
       Nil
     }
-    _ -> Nil
+    _, _ -> Nil
   }
-  context.log("  " <> role.name <> " on " <> host)
   let _ =
     context.runner.remote(host, app_cmd.stop_all(context.config, role.name))
   use _ <- result.try(context.runner.remote(
@@ -111,14 +124,27 @@ fn remove_host(
   Ok(Nil)
 }
 
+fn remove_host_nomad(
+  context: Context,
+  role: config.Role,
+  host: String,
+) -> Result(Nil, GingerError) {
+  use _ <- result.try(context.runner.remote(
+    host,
+    nomad_cmd.stop_job(context.config, role.name),
+  ))
+  Ok(Nil)
+}
+
 fn prune(context: Context) -> Result(Context, GingerError) {
   context.log("Pruning old containers and images...")
   use _ <- result.try(
     list.try_fold(config.all_hosts(context.config), Nil, fn(_, host) {
-      use _ <- result.try(context.runner.remote(
-        host,
-        prune_cmd.all(context.config),
-      ))
+      let cmd = case context.config.runtime {
+        DockerRuntime -> prune_cmd.all(context.config)
+        NomadRuntime -> nomad_cmd.system_gc()
+      }
+      use _ <- result.try(context.runner.remote(host, cmd))
       Ok(Nil)
     }),
   )

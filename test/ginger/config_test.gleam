@@ -1,6 +1,7 @@
 import ginger/config.{
-  Acquire, BootApp, BootProxy, Build, Count, Hook, HookSpec, Lock, Percent,
-  Prune, Push, Release,
+  Acquire, BootApp, BootProxy, Build, Count, DockerRuntime, Hook, HookSpec,
+  KamalProxyEgress, Lock, NomadRuntime, Percent, Prune, Push, Release,
+  TraefikEgress,
 }
 import ginger/config/decode
 import ginger/config/validate
@@ -22,6 +23,28 @@ pub fn decode_minimal_test() {
   assert cfg.service == "blog"
   assert cfg.image == "ghcr.io/acme/blog"
   assert cfg.retain_containers == 5
+  // default: nomad + traefik
+  assert cfg.runtime == NomadRuntime
+  assert cfg.egress == TraefikEgress
+}
+
+pub fn decode_docker_runner_test() {
+  let yaml =
+    minimal
+    <> "\nrunner: docker\negress: kamal-proxy\n"
+  let assert Ok(cfg) = decode.from_string(yaml)
+  assert cfg.runtime == DockerRuntime
+  assert cfg.egress == KamalProxyEgress
+}
+
+pub fn decode_invalid_runner_combo_test() {
+  let yaml = minimal <> "\nrunner: nomad\negress: kamal-proxy\n"
+  let assert Error(_) = decode.from_string(yaml)
+}
+
+pub fn decode_unknown_runner_test() {
+  let yaml = minimal <> "\nrunner: kubernetes\n"
+  let assert Error(_) = decode.from_string(yaml)
 }
 
 pub fn decode_roles_test() {

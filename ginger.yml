@@ -1,6 +1,9 @@
 service: blog
 image: ghcr.io/acme/blog
 
+runner: nomad        # nomad (default) | docker
+egress: traefik      # traefik (default, required for nomad) | kamal-proxy (required for docker)
+
 servers:
   web:
     hosts: [10.0.0.1, 10.0.0.2, 10.0.0.3]

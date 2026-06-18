@@ -42,7 +42,8 @@ pub fn remove_env_file(path: String) -> Command {
 /// `docker run --detach ...` for a role's container at a version.
 /// Secrets are loaded from `env_file_path` (already written to the host);
 /// non-secret plain env vars are passed inline via `--env`. `network`
-/// is the docker network to join (the proxy's network).
+/// is the docker network to join (the proxy's network). `extra_labels` are
+/// appended after the standard ginger labels (used for Traefik routing labels).
 pub fn run(
   config: Config,
   role: Role,
@@ -51,6 +52,7 @@ pub fn run(
   plain_env: List(#(String, String)),
   env_file: String,
   network: String,
+  extra_labels: List(#(String, String)),
 ) -> Command {
   let name = container_name(config, role.name, version)
   let image = image_ref(config, version)
@@ -70,6 +72,7 @@ pub fn run(
         #("role", role.name),
         #("version", version),
       ]),
+      command.flag_pairs("--label", extra_labels),
       [image],
       role_cmd_tokens(role),
     ]),

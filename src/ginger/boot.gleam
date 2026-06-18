@@ -1,9 +1,14 @@
 import ginger/barrier
 import ginger/commands/app
+import ginger/commands/nomad as nomad_cmd
 import ginger/commands/proxy as proxy_cmd
 import ginger/commands/registry as registry_cmd
-import ginger/config.{type Config, type Role, container_prefix}
-import ginger/context.{type Context, plain_env, secret_env}
+import ginger/commands/traefik as traefik_cmd
+import ginger/config.{
+  type Config, type Role, DockerRuntime, KamalProxyEgress, NomadRuntime,
+  TraefikEgress, container_prefix,
+}
+import ginger/context.{type Context, container_env, plain_env, secret_env}
 import ginger/error.{type GingerError, DeployAborted}
 import ginger/rolling
 import ginger/secrets
@@ -155,9 +160,22 @@ fn collect_results(
 
 // --- single-host zero-downtime swap ----------------------------------------
 
-/// Boot a single role's container on a single host: rename any clashing
-/// container, start the new one, switch proxy traffic, then stop the old one.
+/// Boot a single role's container on a single host. Dispatches to the
+/// runtime-specific implementation (Docker or Nomad).
 pub fn boot_host(
+  context: Context,
+  role: Role,
+  host: String,
+) -> Result(Context, GingerError) {
+  case context.config.runtime {
+    DockerRuntime -> boot_host_docker(context, role, host)
+    NomadRuntime -> boot_host_nomad(context, role, host)
+  }
+}
+
+/// Docker path: rename any clashing container, start the new one, switch
+/// proxy traffic (kamal-proxy), then stop and remove the old one.
+fn boot_host_docker(
   context: Context,
   role: Role,
   host: String,
@@ -181,7 +199,6 @@ pub fn boot_host(
     context.runner.probe(host, app.running_names(config, role.name))
   let old_version = parse_old_version(config, role.name, running_out)
 
-  // Login to the registry on the deploy host so docker pull succeeds.
   use _ <- result.try(
     case secrets.resolve(context.secrets, config.registry.password) {
       Some(password) ->
@@ -193,11 +210,10 @@ pub fn boot_host(
     },
   )
 
-  // Find which proxy serves this host and which network it is on, so the app
-  // joins the right network and is registered with the right proxy container.
   let #(proxy_container, network) = resolve_proxy_info(context, host)
 
-  // Write secrets to a tmpfile so they stay out of `docker run` process args.
+  let extra_labels = traefik_labels_for(context, role)
+
   let env_file = app.env_file_path(config, role.name, version)
   use _ <- result.try(context.runner.remote(
     host,
@@ -206,22 +222,29 @@ pub fn boot_host(
 
   use _ <- result.try(context.runner.remote(
     host,
-    app.run(config, role, host, version, plain_env(context), env_file, network),
+    app.run(
+      config,
+      role,
+      host,
+      version,
+      plain_env(context),
+      env_file,
+      network,
+      extra_labels,
+    ),
   ))
 
-  // Clean up the env-file once the container is running.
   let _ = context.runner.remote(host, app.remove_env_file(env_file))
 
-  use _ <- result.try(case config.proxy {
-    Some(proxy) ->
+  use _ <- result.try(case config.egress, config.proxy {
+    KamalProxyEgress, Some(proxy) ->
       context.runner.remote(
         host,
         proxy_cmd.deploy(config, role, proxy, version, proxy_container),
       )
-    None -> Ok("")
+    _, _ -> Ok("")
   })
 
-  // Deployment of the new container succeeded — stop AND remove the old one.
   case old_version {
     Some(ov) if ov != version -> {
       context.log("Removing old container for version " <> ov <> " on " <> host)
@@ -233,22 +256,96 @@ pub fn boot_host(
   }
 }
 
-/// The name of the running kamal-proxy container on this host, or None.
-fn detect_proxy(context: Context, host: String) -> option.Option(String) {
-  let #(found, _) = context.runner.probe(host, proxy_cmd.detect())
-  case string.trim(found) {
-    "" -> None
-    name -> Some(name)
+/// Nomad path: submit a Nomad job with the Docker driver. Traefik labels are
+/// embedded in the job spec so Traefik auto-discovers the service. Nomad
+/// handles rolling updates and container lifecycle internally.
+fn boot_host_nomad(
+  context: Context,
+  role: Role,
+  host: String,
+) -> Result(Context, GingerError) {
+  let config = context.config
+  let version = context.version
+  context.log(
+    "Submitting Nomad job "
+    <> config.service
+    <> "-"
+    <> role.name
+    <> " on "
+    <> host
+    <> "...",
+  )
+
+  use _ <- result.try(
+    case secrets.resolve(context.secrets, config.registry.password) {
+      Some(password) ->
+        context.runner.remote(
+          host,
+          registry_cmd.login_stdin(config.registry, password),
+        )
+      option.None -> Ok("")
+    },
+  )
+
+  let t_labels = traefik_labels_for(context, role)
+  let app_port = case config.proxy {
+    Some(proxy) -> proxy.app_port
+    None -> 80
+  }
+
+  // Nomad's docker driver does not read the host's ~/.docker/config.json, so
+  // embed registry auth in the task config for private image pulls.
+  let registry_auth =
+    case secrets.resolve(context.secrets, config.registry.password) {
+      Some(password) -> Some(#(config.registry.username, password))
+      option.None -> option.None
+    }
+
+  use _ <- result.try(context.runner.remote(
+    host,
+    nomad_cmd.run_job(
+      config,
+      role,
+      version,
+      // Nomad embeds env (incl. secrets) in the job spec's Env map, which is
+      // piped via stdin heredoc — not exposed in process args.
+      container_env(context),
+      t_labels,
+      app_port,
+      registry_auth,
+    ),
+  ))
+
+  Ok(context)
+}
+
+/// Traefik routing labels for a role, or empty list when egress is kamal-proxy
+/// or there is no proxy config.
+fn traefik_labels_for(context: Context, role: Role) -> List(#(String, String)) {
+  case context.config.egress, context.config.proxy {
+    TraefikEgress, Some(proxy) ->
+      traefik_cmd.labels(context.config, role, proxy)
+    _, _ -> []
   }
 }
 
-/// Ensure a proxy is available on the host. Reuses an existing one if found;
-/// otherwise boots ginger's own on the ginger network.
+/// Ensure the egress proxy is available on the host. Dispatches to the
+/// egress-specific implementation. Returns the proxy container name.
 pub fn ensure_proxy(
   context: Context,
   host: String,
 ) -> Result(String, GingerError) {
-  case detect_proxy(context, host) {
+  case context.config.egress {
+    KamalProxyEgress -> ensure_kamal_proxy(context, host)
+    TraefikEgress -> ensure_traefik(context, host)
+  }
+}
+
+fn ensure_kamal_proxy(
+  context: Context,
+  host: String,
+) -> Result(String, GingerError) {
+  case detect_kamal_proxy(context, host) {
     Some(name) -> {
       context.log("Reusing existing proxy '" <> name <> "' on " <> host)
       Ok(name)
@@ -267,13 +364,70 @@ pub fn ensure_proxy(
   }
 }
 
+fn ensure_traefik(
+  context: Context,
+  host: String,
+) -> Result(String, GingerError) {
+  case detect_traefik(context, host) {
+    Some(name) -> {
+      context.log("Reusing existing Traefik '" <> name <> "' on " <> host)
+      Ok(name)
+    }
+    None -> {
+      context.log(
+        "No Traefik on "
+        <> host
+        <> "; booting "
+        <> traefik_cmd.container
+        <> "...",
+      )
+      use _ <- result.try(context.runner.remote(
+        host,
+        proxy_cmd.ensure_network(app.network),
+      ))
+      use _ <- result.try(
+        context.runner.remote(host, traefik_cmd.start_or_run()),
+      )
+      Ok(traefik_cmd.container)
+    }
+  }
+}
+
+fn detect_kamal_proxy(context: Context, host: String) -> option.Option(String) {
+  let #(found, _) = context.runner.probe(host, proxy_cmd.detect())
+  case string.trim(found) {
+    "" -> None
+    name -> Some(name)
+  }
+}
+
+fn detect_traefik(context: Context, host: String) -> option.Option(String) {
+  let #(found, _) = context.runner.probe(host, traefik_cmd.detect())
+  case string.trim(found) {
+    "" -> None
+    name -> Some(name)
+  }
+}
+
 /// Determine the proxy container and docker network for a host.
 /// Public so the remove step in pipeline.gleam can deregister correctly.
 pub fn resolve_proxy_info(context: Context, host: String) -> #(String, String) {
-  case detect_proxy(context, host) {
-    None -> #(proxy_cmd.container, app.network)
+  let detect_fn = case context.config.egress {
+    KamalProxyEgress -> fn() { detect_kamal_proxy(context, host) }
+    TraefikEgress -> fn() { detect_traefik(context, host) }
+  }
+  let network_cmd_fn = case context.config.egress {
+    KamalProxyEgress -> proxy_cmd.network_of
+    TraefikEgress -> traefik_cmd.network_of
+  }
+  let default_container = case context.config.egress {
+    KamalProxyEgress -> proxy_cmd.container
+    TraefikEgress -> traefik_cmd.container
+  }
+  case detect_fn() {
+    None -> #(default_container, app.network)
     Some(name) -> {
-      let #(net, _) = context.runner.probe(host, proxy_cmd.network_of(name))
+      let #(net, _) = context.runner.probe(host, network_cmd_fn(name))
       case string.trim(net) {
         "" -> #(name, app.network)
         network -> #(name, network)

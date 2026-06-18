@@ -1,9 +1,10 @@
 import ginger/config.{
-  type Builder, type Config, type Limit, type Pipeline, type Proxy,
-  type Registry, type Role, type Rolling, type Secrets, type Step, Acquire,
-  BootApp, BootProxy, Build, Builder, Config, Count, Healthcheck, Hook, HookSpec,
-  Lock, Percent, Pipeline, Proxy, Prune, Push, Registry, Release, RemoveApp,
-  Role, Rolling, Secrets, Status,
+  type Builder, type Config, type EgressBackend, type Limit, type Pipeline,
+  type Proxy, type Registry, type Role, type Rolling, type RuntimeBackend,
+  type Secrets, type Step, Acquire, BootApp, BootProxy, Build, Builder, Config,
+  Count, DockerRuntime, Healthcheck, Hook, HookSpec, KamalProxyEgress, Lock,
+  NomadRuntime, Percent, Pipeline, Proxy, Prune, Push, Registry, Release,
+  RemoveApp, Role, Rolling, Secrets, Status, TraefikEgress,
 }
 import ginger/error.{type GingerError, ConfigError, DecodeError}
 import glaml
@@ -36,6 +37,7 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
   use retain <- result.try(optional_int(root, "retain_containers", 5))
   let ssh_user = decode_ssh_user(root)
   use pipelines <- result.try(decode_pipelines(root))
+  use #(runtime, egress) <- result.try(decode_runtime_egress(root))
 
   Ok(Config(
     service: service,
@@ -50,6 +52,8 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
     retain_containers: retain,
     ssh_user: ssh_user,
     pipelines: pipelines,
+    runtime: runtime,
+    egress: egress,
   ))
 }
 
@@ -350,6 +354,38 @@ fn decode_hook(value: glaml.Node) -> Result(Step, GingerError) {
       Ok(Hook(HookSpec(run: run, local: local)))
     }
     _ -> Error(DecodeError("hook must be a string or { run, local } map"))
+  }
+}
+
+// --- runner / egress -------------------------------------------------------
+
+/// Parse `runner` and `egress` together. Default: nomad + traefik.
+/// Only two combinations are valid: nomad+traefik and docker+kamal-proxy.
+fn decode_runtime_egress(
+  root: glaml.Node,
+) -> Result(#(RuntimeBackend, EgressBackend), GingerError) {
+  let runner = optional_string_node(root, "runner")
+  let egress = optional_string_node(root, "egress")
+  case runner {
+    option.None | option.Some("nomad") ->
+      case egress {
+        option.None | option.Some("traefik") -> Ok(#(NomadRuntime, TraefikEgress))
+        option.Some("kamal-proxy") ->
+          Error(ConfigError("runner: nomad requires egress: traefik"))
+        option.Some(e) ->
+          Error(DecodeError("unknown egress: '" <> e <> "' (valid: kamal-proxy, traefik)"))
+      }
+    option.Some("docker") ->
+      case egress {
+        option.None | option.Some("kamal-proxy") ->
+          Ok(#(DockerRuntime, KamalProxyEgress))
+        option.Some("traefik") ->
+          Error(ConfigError("runner: docker requires egress: kamal-proxy"))
+        option.Some(e) ->
+          Error(DecodeError("unknown egress: '" <> e <> "' (valid: kamal-proxy, traefik)"))
+      }
+    option.Some(r) ->
+      Error(DecodeError("unknown runner: '" <> r <> "' (valid: docker, nomad)"))
   }
 }
 

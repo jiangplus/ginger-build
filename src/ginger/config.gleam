@@ -2,6 +2,22 @@ import gleam/list
 import gleam/option.{type Option}
 import gleam/result
 
+/// Container runtime used on the servers.
+/// `docker` (default) manages containers directly with Docker.
+/// `nomad` submits Nomad jobs (requires `egress: traefik`).
+pub type RuntimeBackend {
+  DockerRuntime
+  NomadRuntime
+}
+
+/// Egress/reverse-proxy backend for traffic routing.
+/// `kamal-proxy` (default) uses kamal-proxy for zero-downtime switching.
+/// `traefik` uses Traefik, which auto-discovers containers via Docker labels.
+pub type EgressBackend {
+  KamalProxyEgress
+  TraefikEgress
+}
+
 /// The fully parsed `ginger.yml`. Required sections (service, image, servers,
 /// registry) are non-optional; everything else carries a sensible default when
 /// absent from the file (see `config/decode`).
@@ -19,6 +35,8 @@ pub type Config {
     retain_containers: Int,
     ssh_user: String,
     pipelines: List(Pipeline),
+    runtime: RuntimeBackend,
+    egress: EgressBackend,
   )
 }
 
