@@ -10,8 +10,22 @@ import gleam/option.{None, Some}
 pub fn build(config: Config, version: String) -> Command {
   let image = config.image <> ":" <> version
   let platform = "linux/" <> config.builder.arch
+  // Cache layers are stored as a separate tag in the same registry so they
+  // survive builder restarts. --cache-from is a no-op on a cold cache.
+  let cache_ref = config.image <> ":buildcache"
   let buildx = [
-    "docker", "buildx", "build", "--push", "--platform", platform, "-t", image,
+    "docker",
+    "buildx",
+    "build",
+    "--push",
+    "--platform",
+    platform,
+    "-t",
+    image,
+    "--cache-from",
+    "type=registry,ref=" <> cache_ref,
+    "--cache-to",
+    "type=registry,mode=max,ref=" <> cache_ref,
     ".",
   ]
   case config.builder.remote {

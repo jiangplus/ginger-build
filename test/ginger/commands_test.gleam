@@ -54,7 +54,7 @@ pub fn registry_login_test() {
 pub fn builder_local_build_test() {
   let cmd = builder.build(test_config(), "abc1234")
   assert command.to_string(cmd)
-    == "docker buildx build --push --platform linux/amd64 -t ghcr.io/acme/blog:abc1234 ."
+    == "docker buildx build --push --platform linux/amd64 -t ghcr.io/acme/blog:abc1234 --cache-from type=registry,ref=ghcr.io/acme/blog:buildcache --cache-to type=registry,mode=max,ref=ghcr.io/acme/blog:buildcache ."
 }
 
 pub fn builder_remote_build_test() {
@@ -65,7 +65,7 @@ pub fn builder_remote_build_test() {
     )
   let cmd = builder.build(cfg, "abc1234")
   assert command.to_string(cmd)
-    == "DOCKER_HOST=ssh://docker@10.0.0.9 docker buildx build --push --platform linux/arm64 -t ghcr.io/acme/blog:abc1234 ."
+    == "DOCKER_HOST=ssh://docker@10.0.0.9 docker buildx build --push --platform linux/arm64 -t ghcr.io/acme/blog:abc1234 --cache-from type=registry,ref=ghcr.io/acme/blog:buildcache --cache-to type=registry,mode=max,ref=ghcr.io/acme/blog:buildcache ."
 }
 
 pub fn app_run_test() {

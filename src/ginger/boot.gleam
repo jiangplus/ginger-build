@@ -1,5 +1,6 @@
 import ginger/barrier
 import ginger/commands/app
+import ginger/commands/builder as builder_cmd
 import ginger/commands/nomad as nomad_cmd
 import ginger/commands/proxy as proxy_cmd
 import ginger/commands/registry as registry_cmd
@@ -302,6 +303,14 @@ fn boot_host_nomad(
       Some(password) -> Some(#(config.registry.username, password))
       option.None -> option.None
     }
+
+  // Pre-pull the image so the Nomad allocation starts without a registry pull
+  // delay. The login above already authenticated, so this hits the local layer
+  // cache on the Docker daemon and only transfers new layers.
+  use _ <- result.try(context.runner.remote(
+    host,
+    builder_cmd.pull(config, version),
+  ))
 
   use _ <- result.try(context.runner.remote(
     host,

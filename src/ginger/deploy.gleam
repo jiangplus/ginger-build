@@ -42,13 +42,10 @@ pub fn default_steps(name: String) -> Result(List(Step), Nil) {
         Prune,
         Lock(Release),
       ])
+    // redeploy intentionally omits Build/Push — deploy the image that is already
+    // in the registry. Use `ginger deploy` when you want to rebuild.
     "redeploy" ->
-      Ok([
-        Build,
-        Lock(Acquire),
-        BootApp(rolling: True, version: None),
-        Lock(Release),
-      ])
+      Ok([Lock(Acquire), BootApp(rolling: True, version: None), Lock(Release)])
     "rollback" -> Ok([BootApp(rolling: True, version: None)])
     "remove" -> Ok([RemoveApp])
     _ -> Error(Nil)

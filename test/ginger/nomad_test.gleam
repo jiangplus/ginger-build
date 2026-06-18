@@ -163,6 +163,36 @@ pub fn job_spec_service_labels_always_present_test() {
 }
 
 // ---------------------------------------------------------------------------
+// Fail-fast: Update block deadlines
+
+pub fn job_spec_update_has_progress_deadline_test() {
+  let raw = run_cmd([], [], None, "ginger")
+  // deploy_timeout=30 → 30_000_000_000 ns
+  assert string.contains(raw, "\"ProgressDeadline\":30000000000")
+}
+
+pub fn job_spec_update_has_min_healthy_time_test() {
+  let raw = run_cmd([], [], None, "ginger")
+  assert string.contains(raw, "\"MinHealthyTime\":10000000000")
+}
+
+pub fn job_spec_services_present_when_proxy_configured_test() {
+  let raw = run_cmd([], [], None, "ginger")
+  assert string.contains(raw, "\"Services\":[{")
+  assert string.contains(raw, "\"Provider\":\"nomad\"")
+  assert string.contains(raw, "\"Path\":\"/up\"")
+}
+
+pub fn job_spec_services_absent_when_no_proxy_test() {
+  let cfg = Config(..test_config(), proxy: None)
+  let raw =
+    nomad.run_job(cfg, web_role(), "abc123", [], [], 80, None, "ginger")
+    |> command.to_string
+    |> extract_json_body
+  assert string.contains(raw, "\"Services\"") == False
+}
+
+// ---------------------------------------------------------------------------
 // parse_deployment_status unit tests
 
 pub fn parse_deployment_status_successful_test() {

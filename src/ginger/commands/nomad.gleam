@@ -123,6 +123,44 @@ fn job_json(
       }
   }
 
+  // ProgressDeadline: maximum time Nomad waits for the deployment to become
+  // healthy before marking it failed and triggering AutoRevert. Expressed in
+  // nanoseconds — use deploy_timeout so ginger's gate and Nomad's gate agree.
+  let deadline_ns = case config.proxy {
+    option.Some(proxy) -> proxy.deploy_timeout * 1_000_000_000
+    option.None -> 120 * 1_000_000_000
+  }
+
+  // Native Nomad service with HTTP health check. Only added when the config
+  // has a proxy section (which supplies the health_check_path).
+  let task_group_services = case config.proxy {
+    option.None -> []
+    option.Some(proxy) -> [
+      #(
+        "Services",
+        json.preprocessed_array([
+          json.object([
+            #("Name", json.string(id)),
+            #("Provider", json.string("nomad")),
+            #("PortLabel", json.string("app")),
+            #(
+              "Checks",
+              json.preprocessed_array([
+                json.object([
+                  #("Type", json.string("http")),
+                  #("Path", json.string(proxy.health_check_path)),
+                  // Nomad time values are in nanoseconds.
+                  #("Interval", json.int(5_000_000_000)),
+                  #("Timeout", json.int(2_000_000_000)),
+                ]),
+              ]),
+            ),
+          ]),
+        ]),
+      ),
+    ]
+  }
+
   json.to_string(
     json.object([
       #(
@@ -137,54 +175,65 @@ fn job_json(
             json.object([
               #("MaxParallel", json.int(1)),
               #("AutoRevert", json.bool(True)),
+              // MinHealthyTime: how long a task must pass checks before Nomad
+              // considers this allocation healthy (10 s is a sane minimum).
+              #("MinHealthyTime", json.int(10_000_000_000)),
+              #("ProgressDeadline", json.int(deadline_ns)),
             ]),
           ),
           #(
             "TaskGroups",
             json.preprocessed_array([
-              json.object([
-                #("Name", json.string("app")),
-                #("Count", json.int(1)),
-                #(
-                  "Networks",
-                  json.preprocessed_array([
-                    json.object([
-                      #(
-                        "DynamicPorts",
-                        json.preprocessed_array([
-                          json.object([
-                            #("Label", json.string("app")),
-                            #("To", json.int(app_port)),
-                          ]),
-                        ]),
-                      ),
-                    ]),
-                  ]),
-                ),
-                #(
-                  "Tasks",
-                  json.preprocessed_array([
-                    json.object([
-                      #("Name", json.string("app")),
-                      #("Driver", json.string("docker")),
-                      #("Config", json.object(docker_fields)),
-                      #(
-                        "Env",
-                        json.object(
-                          list.map(all_env, fn(p) { #(p.0, json.string(p.1)) }),
-                        ),
-                      ),
-                      #(
-                        "Resources",
+              json.object(
+                list.append(
+                  [
+                    #("Name", json.string("app")),
+                    #("Count", json.int(1)),
+                    #(
+                      "Networks",
+                      json.preprocessed_array([
                         json.object([
-                          #("CPU", json.int(256)),
-                          #("MemoryMB", json.int(512)),
+                          #(
+                            "DynamicPorts",
+                            json.preprocessed_array([
+                              json.object([
+                                #("Label", json.string("app")),
+                                #("To", json.int(app_port)),
+                              ]),
+                            ]),
+                          ),
                         ]),
-                      ),
-                    ]),
-                  ]),
+                      ]),
+                    ),
+                    #(
+                      "Tasks",
+                      json.preprocessed_array([
+                        json.object([
+                          #("Name", json.string("app")),
+                          #("Driver", json.string("docker")),
+                          #("Config", json.object(docker_fields)),
+                          #(
+                            "Env",
+                            json.object(
+                              list.map(all_env, fn(p) {
+                                #(p.0, json.string(p.1))
+                              }),
+                            ),
+                          ),
+                          #(
+                            "Resources",
+                            json.object([
+                              #("CPU", json.int(256)),
+                              #("MemoryMB", json.int(512)),
+                            ]),
+                          ),
+                        ]),
+                      ]),
+                    ),
+                  ],
+                  task_group_services,
                 ),
-              ]),
+              ),
             ]),
           ),
         ]),
@@ -192,6 +241,7 @@ fn job_json(
     ]),
   )
 }
+
 
 /// Parse the deployment status out of `nomad job deployments -latest` output.
 /// Returns the status string ("successful", "failed", "running", etc.) or
