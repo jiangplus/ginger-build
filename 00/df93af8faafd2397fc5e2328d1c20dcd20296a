@@ -1,0 +1,80 @@
+.claude/commands/ginger.md
+  s_9232629e5888c0::t_a78554e0f9c9c4 15-18,63,73-78,82-86,94,96,99,101-142,144-145,148,150,154-155,161,201-206,215,234,237-239,255
+README.zh.md
+  s_9232629e5888c0::t_ce3a17e7f8b96f 115-118
+  s_9232629e5888c0::t_cd8d0d8b52cb72 3,7,135,137-138,152,178-190,197-200,207-210,214-216,218-219,221,223,243
+test/ginger/commands_test.gleam
+  s_9232629e5888c0::t_da3e94446f5c7a 9-10
+  s_9232629e5888c0::t_f0ed7c3572a26e 80
+  s_9232629e5888c0::t_eaf61f40097e2c 39-40
+  s_9232629e5888c0::t_59a8591b85bc75 108
+src/ginger/commands/app.gleam
+  s_9232629e5888c0::t_5dc1cc15f5930e 45-46,55,75
+src/ginger/config.gleam
+  s_9232629e5888c0::t_33f18e1f7f8c45 5-20,38-39
+test/ginger/pipeline_test.gleam
+  s_9232629e5888c0::t_fffde70fabce61 3-5
+  s_9232629e5888c0::t_aa3a88227cc30b 162
+  s_9232629e5888c0::t_3842e3f6a7b5da 36-37
+src/ginger/config/decode.gleam
+  s_9232629e5888c0::t_9372c99a1effd9 40
+  s_9232629e5888c0::t_805dea2c955acb 55-56
+  s_9232629e5888c0::t_244235058837dc 2-7
+  s_9232629e5888c0::t_62c8af5aaf536e 362-388
+  s_9232629e5888c0::t_297808f5b4acf4 360-361,389-391
+src/ginger/commands/traefik.gleam
+  s_9232629e5888c0::t_27af5117b9b2a8 1-84,88-91,93-106,108-116
+  s_e9ed806a3d225c::t_9bf1ecc9143dbe 85-87,92,107
+src/ginger/boot.gleam
+  s_e9ed806a3d225c::t_9c366d2dbd7a54 296-303,315
+  s_9232629e5888c0::t_b52acd8048fa01 163-164,169-181,215-216,225-234,239-240,245,259-295,304-309,313-314,316-328
+  s_e9ed806a3d225c::t_fa74ae93f1f2b1 11
+  s_e9ed806a3d225c::t_423512279d416d 310-312
+  s_9232629e5888c0::t_e4403a92dd0116 332-333,338-348,367-411,415-428,430
+  s_9232629e5888c0::t_e0e2591263fe15 3,6-10
+src/ginger/pipeline.gleam
+  s_9232629e5888c0::t_8d1191e6406ece 94-104,107-108,116,127-134
+  s_9232629e5888c0::t_2e06d4461c5997 143-147
+  s_9232629e5888c0::t_19e48b704aa63b 5,10-12
+test/ginger/config_test.gleam
+  s_9232629e5888c0::t_13edc553cd6718 2-4
+  s_9232629e5888c0::t_72a08752344940 26-47
+ginger.yml
+  s_9232629e5888c0::t_df40a43f1c9508 4-6
+README.md
+  s_9232629e5888c0::t_ddcac39e6b6f70 5-7,11,14,122,124-125,139,165-184,191-194,201-204,208-221,223-235,241
+  s_9232629e5888c0::t_8a4cad81cc5f90 102-105
+src/ginger/commands/nomad.gleam
+  s_9232629e5888c0::t_b6338fd4c81444 123-126
+  s_e9ed806a3d225c::t_c92cae7a2f0d3a 108,110
+  s_9232629e5888c0::t_fa70ac3bf950b9 1-4,6-20,22-23,33-65,67-107,109,120,127-153
+  s_e9ed806a3d225c::t_befbfcd47ee542 21,24-32
+  s_9232629e5888c0::t_5875549e22a403 5
+  s_e9ed806a3d225c::t_ecdb809b852b50 66
+  s_e9ed806a3d225c::t_3393d2b0f6119e 111-119
+  s_9232629e5888c0::t_d8e94aac531788 121-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "00df93af8faafd2397fc5e2328d1c20dcd20296a",
+  "prompts": {},
+  "sessions": {
+    "s_9232629e5888c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a2ba2b1-8b2c-45e5-ba8f-ab313e76cdc6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    },
+    "s_e9ed806a3d225c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "931f6a9c-6836-4bdb-a9b8-4af9de9ee16d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
