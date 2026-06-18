@@ -238,12 +238,32 @@ proxy:
 
 ```sh
 gleam run -- <command>        # run without installing
-gleam test                    # run the test suite (76 tests)
+gleam test                    # run the test suite (96 tests)
 gleam format src test         # format
 just build                    # gleam build
 just escript                  # gleam export escript → ./ginger (single-file binary)
 just install                  # build escript and copy to ~/bin/ginger
 ```
+
+### Test layout
+
+| File | What it covers |
+|------|---------------|
+| `test/ginger/config_test.gleam` | YAML decode, runner/egress validation, default values |
+| `test/ginger/commands_test.gleam` | Command string rendering: builder, app, proxy, registry, lock, prune |
+| `test/ginger/nomad_test.gleam` | Nomad job spec structure (JSON validity, labels array shape, Env, auth, Services, deadlines), `parse_deployment_status` |
+| `test/ginger/pipeline_test.gleam` | Pipeline interpreter with a fake executor: command ordering, proxy reuse |
+| `test/ginger/rolling_test.gleam` | Batch-size calculation for int and `%` limits |
+| `test/ginger/secrets_test.gleam` | Env merge, glob expansion, dotenv edge cases |
+| `test/ginger/boot_test.gleam` | `parse_old_version` |
+
+### Key design decisions
+
+- **Nomad + Traefik (default)** / **Docker + kamal-proxy** — two valid combinations; mixing them is a config error caught at parse time.
+- **Typed Nomad job spec** — `commands/nomad.gleam` builds JSON via `gleam_json`; no hand-rolled string concatenation. The `labels` shape (list-of-map), `Env` map, `auth` block, `Services` health check, and `ProgressDeadline` are all type-checked.
+- **Health gating** — after `nomad job run`, ginger polls `nomad job deployments -latest` every 3 s until `successful`/`failed`/timeout; the Nomad job spec carries a matching `ProgressDeadline` so Nomad's own timeout agrees with ginger's.
+- **Registry build cache** — `docker buildx build` always passes `--cache-from/--cache-to type=registry,ref=<image>:buildcache`; cache survives builder restarts.
+- **redeploy skips build** — `ginger redeploy` deploys the image already in the registry; use `ginger deploy` to rebuild.
 
 ## Example app
 

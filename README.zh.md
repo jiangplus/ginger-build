@@ -240,9 +240,29 @@ proxy:
 
 ```sh
 gleam run -- <命令>           # 不安装直接运行
-gleam test                    # 运行测试套件（76 个测试）
+gleam test                    # 运行测试套件（96 个测试）
 gleam format src test         # 格式化代码
 just build                    # gleam build
 just escript                  # gleam export escript → ./ginger（单文件二进制）
 just install                  # 构建 escript 并复制到 ~/bin/ginger
 ```
+
+### 测试结构
+
+| 文件 | 覆盖范围 |
+|------|---------|
+| `test/ginger/config_test.gleam` | YAML 解析、runner/egress 组合校验、默认值 |
+| `test/ginger/commands_test.gleam` | 命令字符串渲染：builder、app、proxy、registry、lock、prune |
+| `test/ginger/nomad_test.gleam` | Nomad job spec 结构（JSON 合法性、labels 数组形状、Env、auth、Services、ProgressDeadline）、`parse_deployment_status` |
+| `test/ginger/pipeline_test.gleam` | 流水线解释器（fake executor）：命令顺序、代理复用 |
+| `test/ginger/rolling_test.gleam` | 整数和百分比批大小计算 |
+| `test/ginger/secrets_test.gleam` | 环境变量合并、glob 展开、dotenv 边界情况 |
+| `test/ginger/boot_test.gleam` | `parse_old_version` |
+
+### 关键设计决策
+
+- **Nomad + Traefik（默认）** / **Docker + kamal-proxy** — 仅支持这两种组合；混用会在配置解析阶段报错。
+- **类型化 Nomad job spec** — `commands/nomad.gleam` 通过 `gleam_json` 构建 JSON，不使用字符串拼接。`labels` 形状（list-of-map）、`Env` 字典、`auth` 块、`Services` 健康检查、`ProgressDeadline` 均受类型系统约束。
+- **健康门控** — `nomad job run` 后，ginger 每 3 秒轮询 `nomad job deployments -latest`，直到 `successful`/`failed`/超时；job spec 的 `ProgressDeadline` 与 ginger 超时保持一致。
+- **注册表构建缓存** — `docker buildx build` 始终传入 `--cache-from/--cache-to type=registry,ref=<image>:buildcache`；缓存存活于注册表，构建器重启不丢失。
+- **redeploy 跳过构建** — `ginger redeploy` 直接部署注册表中已有的镜像；需要重新构建时使用 `ginger deploy`。
