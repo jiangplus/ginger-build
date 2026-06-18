@@ -78,7 +78,7 @@ just install   # 构建 escript 并复制到 ~/bin/ginger
 
 ```sh
 ginger version
-# ginger 0.2.0
+# ginger 0.2.1
 ```
 
 ## 命令
