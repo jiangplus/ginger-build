@@ -6,8 +6,8 @@ import ginger/commands/proxy
 import ginger/commands/prune
 import ginger/commands/registry
 import ginger/config.{
-  type Config, type Role, Builder, Config, Count, DockerRuntime, KamalProxyEgress,
-  Proxy, Registry, Role, Rolling, Secrets,
+  type Config, type Role, Builder, Config, Count, DockerRuntime,
+  KamalProxyEgress, Proxy, Registry, Role, Rolling, Secrets,
 }
 import gleam/option.{None, Some}
 
@@ -29,7 +29,17 @@ fn test_config() -> Config {
       deploy_timeout: 30,
       drain_timeout: 30,
     )),
-    builder: Builder(arch: "amd64", remote: None),
+    builder: Builder(
+      arch: "amd64",
+      remote: None,
+      context: ".",
+      dockerfile: None,
+      tags: [],
+      cache: config.CacheMin,
+      provenance: False,
+      build_args: [],
+      push_registry: None,
+    ),
     env: [],
     secrets: Secrets(load: [".env"], inject: []),
     rolling: Rolling(limit: Count(1), wait: 0, parallel_roles: False),
@@ -39,6 +49,14 @@ fn test_config() -> Config {
     runtime: DockerRuntime,
     egress: KamalProxyEgress,
     network: "ginger",
+    traefik_provider: "docker",
+    force_pull: False,
+    volumes: [],
+    extra_hosts: [],
+    labels: [],
+    resources: config.Resources(cpu: 256, memory: 512),
+    ssh_timeout: 600,
+    deps: [],
   )
 }
 
@@ -54,18 +72,54 @@ pub fn registry_login_test() {
 pub fn builder_local_build_test() {
   let cmd = builder.build(test_config(), "abc1234")
   assert command.to_string(cmd)
-    == "docker buildx build --push --platform linux/amd64 -t ghcr.io/acme/blog:abc1234 --cache-from type=registry,ref=ghcr.io/acme/blog:buildcache --cache-to type=registry,mode=max,ref=ghcr.io/acme/blog:buildcache ."
+    == "docker buildx build --push --platform linux/amd64 --provenance=false --sbom=false -t ghcr.io/acme/blog:abc1234 --cache-from type=registry,ref=ghcr.io/acme/blog:buildcache --cache-to type=registry,mode=min,ref=ghcr.io/acme/blog:buildcache ."
 }
 
 pub fn builder_remote_build_test() {
   let cfg =
     Config(
       ..test_config(),
-      builder: Builder(arch: "arm64", remote: Some("ssh://docker@10.0.0.9")),
+      builder: Builder(
+        arch: "arm64",
+        remote: Some("ssh://docker@10.0.0.9"),
+        context: ".",
+        dockerfile: None,
+        tags: [],
+        cache: config.CacheMin,
+        provenance: False,
+        build_args: [],
+        push_registry: None,
+      ),
     )
   let cmd = builder.build(cfg, "abc1234")
   assert command.to_string(cmd)
-    == "DOCKER_HOST=ssh://docker@10.0.0.9 docker buildx build --push --platform linux/arm64 -t ghcr.io/acme/blog:abc1234 --cache-from type=registry,ref=ghcr.io/acme/blog:buildcache --cache-to type=registry,mode=max,ref=ghcr.io/acme/blog:buildcache ."
+    == "DOCKER_HOST=ssh://docker@10.0.0.9 docker buildx build --push --platform linux/arm64 --provenance=false --sbom=false -t ghcr.io/acme/blog:abc1234 --cache-from type=registry,ref=ghcr.io/acme/blog:buildcache --cache-to type=registry,mode=min,ref=ghcr.io/acme/blog:buildcache ."
+}
+
+pub fn builder_push_registry_test() {
+  // push_registry swaps the host segment of `image` while preserving the repo
+  // path, so build/push (and cache) target the mirror; the runtime image is
+  // unchanged elsewhere.
+  let cfg =
+    Config(
+      ..test_config(),
+      image: "registry.juluo.xyz/blog",
+      builder: Builder(
+        arch: "amd64",
+        remote: Some("ssh://ubuntu@wamo.city"),
+        context: ".",
+        dockerfile: None,
+        tags: [],
+        cache: config.CacheMin,
+        provenance: False,
+        build_args: [],
+        push_registry: Some("mirror-registry.sola.day"),
+      ),
+    )
+  assert builder.push_image(cfg) == "mirror-registry.sola.day/blog"
+  let cmd = builder.build(cfg, "abc1234")
+  assert command.to_string(cmd)
+    == "DOCKER_HOST=ssh://ubuntu@wamo.city docker buildx build --push --platform linux/amd64 --provenance=false --sbom=false -t mirror-registry.sola.day/blog:abc1234 --cache-from type=registry,ref=mirror-registry.sola.day/blog:buildcache --cache-to type=registry,mode=min,ref=mirror-registry.sola.day/blog:buildcache ."
 }
 
 pub fn app_run_test() {
@@ -186,4 +240,27 @@ pub fn prune_all_test() {
   assert command.to_string(prune.all(test_config()))
     == "docker container prune --force --filter label=service=blog"
     <> " && docker image prune --force --filter label=service=blog"
+}
+
+pub fn builder_context_and_dockerfile_test() {
+  // dockerfile is declared relative to the context; docker resolves -f
+  // against cwd, so the rendered command must join them.
+  let cfg =
+    Config(
+      ..test_config(),
+      builder: Builder(
+        arch: "amd64",
+        remote: None,
+        context: "../repo",
+        dockerfile: "cmd/relay/Dockerfile" |> Some,
+        tags: ["latest"],
+        cache: config.CacheNone,
+        provenance: False,
+        build_args: [],
+        push_registry: None,
+      ),
+    )
+  let cmd = builder.build(cfg, "abc1234")
+  assert command.to_string(cmd)
+    == "docker buildx build --push --platform linux/amd64 --provenance=false --sbom=false -t ghcr.io/acme/blog:abc1234 -t ghcr.io/acme/blog:latest -f ../repo/cmd/relay/Dockerfile ../repo"
 }

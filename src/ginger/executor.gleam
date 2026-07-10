@@ -42,6 +42,29 @@ pub fn run_with_timeout(
   }
 }
 
+/// Run a command over SSH, streaming its output to the operator's terminal
+/// as it arrives. Non-zero exit → `ExecError` (output was already printed
+/// live, so the error carries only the exit code). The timeout is an
+/// inactivity deadline — it resets whenever the remote produces output.
+pub fn run_streamed(
+  session: Session,
+  cmd: Command,
+  timeout_ms: Int,
+) -> Result(String, GingerError) {
+  let rendered = command.to_string(cmd)
+  use exit <- result.try(ssh.exec_stream(session, rendered, timeout_ms))
+  case exit {
+    0 -> Ok("")
+    _ ->
+      Error(ExecError(
+        host: session.host,
+        command: rendered,
+        exit: exit,
+        stderr: "",
+      ))
+  }
+}
+
 /// Run a command over SSH but tolerate a non-zero exit, returning
 /// `#(combined_output, exit_status)`. Used for probes (e.g. "does this
 /// container exist?") where a non-zero exit is information, not an error.
@@ -72,7 +95,10 @@ pub fn run_local_streamed(cmd: Command) -> Result(String, GingerError) {
     0 -> Ok("")
     _ ->
       Error(HookFailed(
-        "local command failed (exit " <> int.to_string(exit) <> "): " <> rendered,
+        "local command failed (exit "
+        <> int.to_string(exit)
+        <> "): "
+        <> rendered,
       ))
   }
 }

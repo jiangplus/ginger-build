@@ -38,7 +38,47 @@ pub type Config {
     runtime: RuntimeBackend,
     egress: EgressBackend,
     network: String,
+    // How Traefik discovers this service's routing config:
+    // "docker" (default) emits Docker container labels (Traefik Docker provider);
+    // "nomad" emits Nomad service tags (Traefik Nomad provider). Only relevant
+    // for runner: nomad + egress: traefik.
+    traefik_provider: String,
+    // Always re-pull the image on deploy. Nomad's docker driver defaults to
+    // false, so a rebuilt image pushed under the SAME tag (e.g. an uncommitted
+    // change) is NOT re-pulled and the stale local image keeps running. Set true
+    // to force a fresh pull every deploy.
+    force_pull: Bool,
+    // Container plumbing passthroughs, applied to both runtimes:
+    // volumes ("host:container"), extra_hosts ("name:ip"), and free-form
+    // labels stamped on containers (docker) / task config + job Meta (nomad).
+    volumes: List(String),
+    extra_hosts: List(String),
+    labels: List(#(String, String)),
+    // Nomad task resources (MHz / MB). Docker runtime ignores these.
+    resources: Resources,
+    // Default timeout (seconds) for remote SSH commands and hooks. Individual
+    // hooks can override with their own `timeout:`.
+    ssh_timeout: Int,
+    // Paths to other ginger config files this service depends on, relative to
+    // this config file's directory. Used by multi-config deploys to order
+    // services; a dep that isn't part of the deploy set is ignored.
+    deps: List(String),
   )
+}
+
+/// Nomad task resource reservation.
+pub type Resources {
+  Resources(cpu: Int, memory: Int)
+}
+
+/// Registry-cache export policy for `docker buildx build`.
+/// `CacheMin` (default) exports only final-stage layers; `CacheMax` exports
+/// all intermediate layers (slow to export, best hit rate); `CacheNone`
+/// disables the registry cache entirely.
+pub type CacheMode {
+  CacheNone
+  CacheMin
+  CacheMax
 }
 
 /// A group of servers that run the same container. The `primary` role is the
@@ -69,7 +109,37 @@ pub type Proxy {
 /// Image builder. `remote` set → build on a remote Docker host over SSH;
 /// absent → build locally with `docker buildx`.
 pub type Builder {
-  Builder(arch: String, remote: Option(String))
+  Builder(
+    arch: String,
+    remote: Option(String),
+    // Build context directory (default "."). Relative paths are resolved
+    // from the operator's cwd, so configs living outside the repo can point
+    // back at it. The version git-sha is also resolved from this directory.
+    context: String,
+    // Dockerfile path relative to the context (docker build -f). Absent →
+    // the context's default Dockerfile.
+    dockerfile: Option(String),
+    // Extra tags pushed alongside the version tag (e.g. ["latest"]), so
+    // `:latest`-pinned runtime specs and versioned rollback history coexist.
+    tags: List(String),
+    // Registry build-cache policy (see CacheMode). Default: min.
+    cache: CacheMode,
+    // Emit provenance attestations + SBOM (buildx defaults them on, which
+    // slows the export and bloats simple registries with extra manifests).
+    // ginger defaults them OFF; set true to restore buildx behaviour.
+    provenance: Bool,
+    // Extra `--build-arg KEY=VALUE` pairs passed to `docker buildx build`.
+    // Useful for e.g. HTTP_PROXY/HTTPS_PROXY so RUN steps (npm/gem installs)
+    // can reach the internet through a proxy on the build host.
+    build_args: List(#(String, String)),
+    // Optional separate registry host to build/push to, when it differs from the
+    // runtime image host. The image's repository path is preserved; only the
+    // host segment of `image` is swapped. Used when builds push to a fast
+    // intermediary registry that shares a backend with the runtime registry, so
+    // the runtime host can still pull the same image (e.g. push to an overseas
+    // mirror, pull from an in-region registry sharing one object store + DB).
+    push_registry: Option(String),
+  )
 }
 
 /// Auto-env secret handling. `load` lists dotenv files to merge with the
@@ -115,9 +185,10 @@ pub type LockAction {
 }
 
 /// An inline shell hook. `local` True runs on the operator machine; False runs
-/// the command over SSH on each targeted host.
+/// the command over SSH on each targeted host. `timeout` (seconds) overrides
+/// the config-level `ssh.command_timeout` for remote hooks.
 pub type HookSpec {
-  HookSpec(run: String, local: Bool)
+  HookSpec(run: String, local: Bool, timeout: Option(Int))
 }
 
 /// Look up a role by name.

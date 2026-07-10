@@ -1,5 +1,5 @@
 -module(env_ffi).
--export([get_env/0, read_file/1, local_exec/1, local_exec_stream/1, git_sha/0]).
+-export([get_env/0, read_file/1, local_exec/1, local_exec_stream/1, git_sha/1, timestamp/0]).
 
 %% Return the whole process environment as a list of {Key, Value} binaries.
 get_env() ->
@@ -63,10 +63,22 @@ collect(Port, Acc) ->
             {Output, Status}
     end.
 
-%% Resolve the current git revision (HEAD). Returns {ok, Sha} | {error, Reason}.
-git_sha() ->
-    {Output, Status} = do_exec("git rev-parse HEAD"),
+%% Resolve the current git revision (HEAD) of a directory.
+%% Returns {ok, Sha} | {error, Reason}.
+git_sha(Dir) ->
+    Cmd = "git -C " ++ shell_quote(binary_to_list(Dir)) ++ " rev-parse HEAD",
+    {Output, Status} = do_exec(Cmd),
     case Status of
         0 -> {ok, string:trim(Output)};
         _ -> {error, <<"not a git repository (or git unavailable)">>}
     end.
+
+shell_quote(S) ->
+    "'" ++ lists:flatten([case C of $' -> "'\\''"; _ -> [C] end || C <- S]) ++ "'".
+
+%% UTC timestamp "YYYY-MM-DDTHH:MM:SSZ" for the deploy history log.
+timestamp() ->
+    {{Y, Mo, D}, {H, Mi, S}} = calendar:universal_time(),
+    list_to_binary(io_lib:format(
+        "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0BZ", [Y, Mo, D, H, Mi, S]
+    )).

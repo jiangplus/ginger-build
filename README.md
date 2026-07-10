@@ -72,12 +72,16 @@ just install   # builds escript and copies it to ~/bin/ginger
 
 ```sh
 ginger deploy                   # build, push, and deploy with zero downtime
+ginger deploy -c a.yml -c b.yml # deploy several services: parallel builds,
+                                #   deploys ordered by each config's deps:
 ginger deploy --skip-push       # deploy the registry image as-is (no build)
 ginger deploy --tag v1          # pin the image tag; skip git-sha resolution
 ginger redeploy                 # deploy without booting the proxy or pruning
 ginger rollback <version>       # switch traffic back to a previous container
 ginger remove                   # deregister from proxy and remove all containers
-ginger status                   # show running version and proxy state per host
+ginger status                   # show job/container status per host
+ginger logs [-f] [--tail N]     # service logs per host; -f follows live
+ginger history [--tail N]       # deploy audit log from the primary host
 ginger lock release             # release a stuck deploy lock
 ginger lock status              # show current lock holder
 ginger config                   # print the parsed config (secrets redacted)
@@ -85,13 +89,19 @@ ginger version
 ginger help
 ```
 
-Global options:
+Global options (accepted anywhere on the command line):
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-c, --config <file>` | `ginger.yml` | Config file path |
+| `-c, --config <file>` | `ginger.yml` | Config file path; repeatable for group deploys |
 | `-P, --skip-push` | false | Skip image build/push |
 | `-t, --tag <version>` | git SHA | Pin the image tag |
+| `--build-concurrency <n>` | 2 | Parallel builds in group deploys |
+| `-f, --follow` | false | Follow logs (`ginger logs`) |
+| `--tail <n>` | 100 | Lines for `logs` / `history` |
+
+A pipeline in the config with the same name as a command (`status`, `logs`,
+`history`, `deploy`, ...) takes precedence over the built-in behaviour.
 
 ## Configuration (`ginger.yml`)
 
@@ -130,6 +140,11 @@ ssh:
 builder:
   arch: amd64
   remote: ssh://docker@builder  # omit to build locally with docker buildx
+  context: .                    # build-context dir; version git-sha comes from here
+  dockerfile: cmd/app/Dockerfile  # relative to context (monorepo builds)
+  tags: [latest]                # extra tags pushed alongside the version tag
+  cache: min                    # registry build cache: none | min (default) | max
+  provenance: false             # attestations+SBOM off by default (faster export)
 
 env:                            # plain env vars baked into every container
   RAILS_ENV: production

@@ -11,10 +11,10 @@ import ginger/config.{
 }
 import ginger/context.{type Context, container_env, plain_env, secret_env}
 import ginger/error.{type GingerError, DeployAborted, ExecError}
-import gleam/int
 import ginger/rolling
 import ginger/secrets
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -298,11 +298,12 @@ fn boot_host_nomad(
 
   // Nomad's docker driver does not read the host's ~/.docker/config.json, so
   // embed registry auth in the task config for private image pulls.
-  let registry_auth =
-    case secrets.resolve(context.secrets, config.registry.password) {
-      Some(password) -> Some(#(config.registry.username, password))
-      option.None -> option.None
-    }
+  let registry_auth = case
+    secrets.resolve(context.secrets, config.registry.password)
+  {
+    Some(password) -> Some(#(config.registry.username, password))
+    option.None -> option.None
+  }
 
   // Pre-pull the image so the Nomad allocation starts without a registry pull
   // delay. The login above already authenticated, so this hits the local layer
@@ -383,17 +384,30 @@ fn do_wait_nomad_healthy(
           )
           Ok(context)
         }
-        "failed" | "cancelled" ->
+        "failed" | "cancelled" -> {
+          // Surface the actual failure: tail the failing allocation's stderr
+          // so the operator sees why without having to ssh in.
+          let #(logs, _) =
+            context.runner.probe(
+              host,
+              nomad_cmd.alloc_logs_tail(config, role.name),
+            )
+          let log_excerpt = case string.trim(logs) {
+            "" -> "(no allocation logs available)"
+            trimmed -> "--- allocation stderr (last 40 lines) ---\n" <> trimmed
+          }
           Error(ExecError(
             host,
             "nomad job deployments",
             1,
-            "Nomad deployment failed; run `nomad job status "
+            "Nomad deployment failed for "
               <> config.service
               <> "-"
               <> role.name
-              <> "` to inspect",
+              <> "\n"
+              <> log_excerpt,
           ))
+        }
         status -> {
           context.log(
             "Nomad deployment status: "
@@ -491,9 +505,10 @@ fn ensure_traefik(
         <> traefik_cmd.container
         <> "...",
       )
-      use _ <- result.try(
-        context.runner.remote(host, traefik_cmd.start_or_run(network)),
-      )
+      use _ <- result.try(context.runner.remote(
+        host,
+        traefik_cmd.start_or_run(network),
+      ))
       Ok(traefik_cmd.container)
     }
   }

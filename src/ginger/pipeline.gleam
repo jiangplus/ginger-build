@@ -1,6 +1,7 @@
 import ginger/boot
 import ginger/commands/app as app_cmd
 import ginger/commands/builder
+import ginger/commands/history as history_cmd
 import ginger/commands/lock as lock_cmd
 import ginger/commands/nomad as nomad_cmd
 import ginger/commands/proxy as proxy_cmd
@@ -8,15 +9,15 @@ import ginger/commands/prune as prune_cmd
 import ginger/commands/registry as registry_cmd
 import ginger/config.{
   type Pipeline, type Step, Acquire, BootApp, BootProxy, Build, DockerRuntime,
-  Healthcheck, Hook, KamalProxyEgress, Lock, NomadRuntime, Prune, Push, Release,
-  RemoveApp, Status,
+  Healthcheck, Hook, KamalProxyEgress, Lock, NomadRuntime, Prune, Push, Registry,
+  Release, RemoveApp, Status,
 }
 import ginger/context.{type Context}
 import ginger/error.{type GingerError, ConfigError, LockError}
 import ginger/hooks
 import ginger/secrets
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/result
 
 /// Run all steps of a pipeline in order, threading the context. Short-circuits
@@ -35,7 +36,11 @@ pub fn run_step(context: Context, step: Step) -> Result(Context, GingerError) {
     Build -> build(context)
     Push -> Ok(context)
     BootProxy -> boot_proxy(context)
-    BootApp(rolling: rolling, version: _) -> boot.run(context, rolling)
+    BootApp(rolling: rolling, version: _) -> {
+      use context <- result.try(boot.run(context, rolling))
+      record_history(context)
+      Ok(context)
+    }
     RemoveApp -> remove_app(context)
     Prune -> prune(context)
     Healthcheck -> Ok(context)
@@ -49,11 +54,17 @@ pub fn run_step(context: Context, step: Step) -> Result(Context, GingerError) {
 fn build(context: Context) -> Result(Context, GingerError) {
   let config = context.config
   context.log("Building and pushing image...")
-  // Login to the registry first if a password secret is configured.
+  // Login to the registry we push to first if a password secret is configured.
+  // When `builder.push_registry` is set, builds push to that host (which shares
+  // the runtime registry's backend), so log in there with the same credentials.
+  let push_registry = case config.builder.push_registry {
+    Some(host) -> Registry(..config.registry, server: host)
+    None -> config.registry
+  }
   use _ <- result.try(
-    case secrets.resolve(context.secrets, config.registry.password) {
+    case secrets.resolve(context.secrets, push_registry.password) {
       Some(password) ->
-        context.runner.local(registry_cmd.login(config.registry, password))
+        context.runner.local(registry_cmd.login(push_registry, password))
       _ -> Ok("")
     },
   )
@@ -61,6 +72,22 @@ fn build(context: Context) -> Result(Context, GingerError) {
     context.runner.local_streamed(builder.build(config, context.version)),
   )
   Ok(context)
+}
+
+/// Append a deploy-history line on the primary host after a successful
+/// boot-app. Best-effort: a failed append never fails the deploy.
+fn record_history(context: Context) -> Nil {
+  case config.primary_host(context.config) {
+    Ok(host) -> {
+      let _ =
+        context.runner.remote(
+          host,
+          history_cmd.append(context.config, context.version),
+        )
+      Nil
+    }
+    Error(_) -> Nil
+  }
 }
 
 fn boot_proxy(context: Context) -> Result(Context, GingerError) {

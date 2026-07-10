@@ -1,5 +1,6 @@
 import ginger/command.{type Command}
 import ginger/config.{type Config, type Role, container_name, image_ref}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -56,10 +57,17 @@ pub fn run(
 ) -> Command {
   let name = container_name(config, role.name, version)
   let image = image_ref(config, version)
+  let volume_flags =
+    config.volumes |> list.flat_map(fn(v) { ["-v", command.quote(v)] })
+  let add_host_flags =
+    config.extra_hosts |> list.flat_map(fn(h) { ["--add-host", h] })
   command.docker(
     list.flatten([
       ["run", "--detach", "--restart", "unless-stopped"],
       ["--name", name, "--network", network],
+      volume_flags,
+      add_host_flags,
+      command.flag_pairs("--label", config.labels),
       command.flag_pairs("--env", [
         #("GINGER_CONTAINER_NAME", name),
         #("GINGER_VERSION", version),
@@ -178,6 +186,31 @@ pub fn running_names(config: Config, role_name: String) -> Command {
     "--format",
     "{{.Names}}",
   ])
+}
+
+/// Logs of the newest container for a role. `follow` streams (`-f`);
+/// otherwise the last `tail` lines are printed.
+pub fn logs(
+  config: Config,
+  role_name: String,
+  tail: Int,
+  follow: Bool,
+) -> Command {
+  let follow_flag = case follow {
+    True -> "-f "
+    False -> ""
+  }
+  command.raw(
+    "docker logs "
+    <> follow_flag
+    <> "--tail "
+    <> int.to_string(tail)
+    <> " $(docker ps -q --filter label=service="
+    <> config.service
+    <> " --filter label=role="
+    <> role_name
+    <> " | head -1) 2>&1",
+  )
 }
 
 /// Health/status string for a version's container via `docker inspect`.

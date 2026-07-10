@@ -27,7 +27,17 @@ fn test_config() -> Config {
       deploy_timeout: 30,
       drain_timeout: 30,
     )),
-    builder: Builder(arch: "amd64", remote: None),
+    builder: Builder(
+      arch: "amd64",
+      remote: None,
+      context: ".",
+      dockerfile: None,
+      tags: [],
+      cache: config.CacheMin,
+      provenance: False,
+      build_args: [],
+      push_registry: None,
+    ),
     env: [],
     secrets: Secrets(load: [".env"], inject: []),
     rolling: Rolling(limit: Count(1), wait: 0, parallel_roles: False),
@@ -37,6 +47,14 @@ fn test_config() -> Config {
     runtime: NomadRuntime,
     egress: TraefikEgress,
     network: "ginger",
+    traefik_provider: "docker",
+    force_pull: False,
+    volumes: [],
+    extra_hosts: [],
+    labels: [],
+    resources: config.Resources(cpu: 256, memory: 512),
+    ssh_timeout: 600,
+    deps: [],
   )
 }
 
@@ -95,18 +113,13 @@ pub fn job_spec_top_level_keys_test() {
 pub fn job_spec_labels_is_array_not_object_test() {
   // The Docker driver requires labels to be a list-of-map, not a plain map.
   // Verify by checking the raw JSON — json.to_string never adds whitespace.
-  let raw =
-    run_cmd(
-      [],
-      [#("traefik.enable", "true")],
-      None,
-      "ginger",
-    )
+  let raw = run_cmd([], [#("traefik.enable", "true")], None, "ginger")
   assert string.contains(raw, "\"labels\":[{")
 }
 
 pub fn job_spec_env_contains_injected_secret_test() {
-  let raw = run_cmd([#("DATABASE_URL", "postgres://localhost")], [], None, "ginger")
+  let raw =
+    run_cmd([#("DATABASE_URL", "postgres://localhost")], [], None, "ginger")
   assert string.contains(raw, "\"DATABASE_URL\":\"postgres://localhost\"")
 }
 
@@ -167,8 +180,42 @@ pub fn job_spec_service_labels_always_present_test() {
 
 pub fn job_spec_update_has_progress_deadline_test() {
   let raw = run_cmd([], [], None, "ginger")
-  // deploy_timeout=30 → 30_000_000_000 ns
-  assert string.contains(raw, "\"ProgressDeadline\":30000000000")
+  // deploy_timeout=30 → HealthyDeadline 30s; ProgressDeadline = healthy + 60s.
+  assert string.contains(raw, "\"HealthyDeadline\":30000000000")
+  assert string.contains(raw, "\"ProgressDeadline\":90000000000")
+}
+
+pub fn job_spec_nomad_tags_present_when_provider_nomad_test() {
+  // traefik_provider: nomad → routing emitted as Nomad service Tags, minus
+  // the loadbalancer.server.port tag (dynamic port is used).
+  let cfg = Config(..test_config(), traefik_provider: "nomad")
+  let raw =
+    nomad.run_job(
+      cfg,
+      web_role(),
+      "abc123",
+      [],
+      [
+        #("traefik.enable", "true"),
+        #("traefik.http.routers.blog-web.rule", "Host(`blog.example.com`)"),
+        #("traefik.http.services.blog-web.loadbalancer.server.port", "3000"),
+      ],
+      3000,
+      None,
+      "ginger",
+    )
+    |> command.to_string
+    |> extract_json_body
+  assert string.contains(raw, "\"Tags\":[")
+  assert string.contains(raw, "traefik.enable=true")
+  // The tag form ("key=value") of the port is dropped; the Docker label form
+  // ("key":"value") is still emitted and is harmless for the Nomad provider.
+  assert string.contains(raw, "loadbalancer.server.port=") == False
+}
+
+pub fn job_spec_nomad_tags_absent_when_provider_docker_test() {
+  let raw = run_cmd([], [#("traefik.enable", "true")], None, "ginger")
+  assert string.contains(raw, "\"Tags\":[") == False
 }
 
 pub fn job_spec_update_has_min_healthy_time_test() {
@@ -219,4 +266,3 @@ pub fn parse_deployment_status_no_status_line_returns_pending_test() {
   let output = "ID = abc\nJob ID = blog-web\n"
   assert nomad.parse_deployment_status(output) == "pending"
 }
-

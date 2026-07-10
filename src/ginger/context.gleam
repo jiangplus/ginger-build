@@ -13,6 +13,11 @@ pub type Runner {
   Runner(
     /// Run a built command on a host over SSH; non-zero exit is an error.
     remote: fn(String, Command) -> Result(String, GingerError),
+    /// Like `remote` with an explicit timeout in milliseconds (long hooks).
+    remote_timed: fn(String, Command, Int) -> Result(String, GingerError),
+    /// Run a command on a host over SSH, streaming output to the operator's
+    /// terminal live. The timeout is an inactivity deadline in milliseconds.
+    remote_streamed: fn(String, Command, Int) -> Result(String, GingerError),
     /// Run a command on a host tolerating failure: `#(output, exit_status)`.
     probe: fn(String, Command) -> #(String, Int),
     /// Run a built command on the operator machine.

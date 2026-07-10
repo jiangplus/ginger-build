@@ -1,5 +1,5 @@
 -module(ssh_ffi).
--export([start/0, connect/2, connect_cached/2, exec_command/3, exec_with_status/3, close/1, get_args/0]).
+-export([start/0, connect/2, connect_cached/2, exec_command/3, exec_with_status/3, exec_stream/3, close/1, get_args/0]).
 
 %% Reuse a single SSH connection per host within the calling process. OTP ssh
 %% delivers channel messages to the connecting process, so the cache lives in
@@ -122,6 +122,41 @@ finish_status(Out, Err, Status) ->
     Stdout = iolist_to_binary(lists:reverse(Out)),
     Stderr = iolist_to_binary(lists:reverse(Err)),
     {ok, {Stdout, Stderr, Status}}.
+
+%% Like exec_with_status, but prints output (stdout and stderr interleaved)
+%% to the operator's terminal as it arrives, so long-running remote commands
+%% (builds, log follows) give live feedback. The inactivity timeout resets on
+%% every received chunk. Returns {ok, ExitStatus} | {error, Reason}.
+exec_stream(Conn, Cmd, TimeoutMs) ->
+    CmdStr = binary_to_list(Cmd),
+    case ssh_connection:session_channel(Conn, TimeoutMs) of
+        {ok, Chan} ->
+            case ssh_connection:exec(Conn, Chan, CmdStr, TimeoutMs) of
+                success ->
+                    stream_loop(Conn, Chan, TimeoutMs, 0);
+                {error, Reason} ->
+                    {error, list_to_binary(io_lib:format("exec failed: ~p", [Reason]))}
+            end;
+        {error, Reason} ->
+            {error, list_to_binary(io_lib:format("channel failed: ~p", [Reason]))}
+    end.
+
+stream_loop(Conn, Chan, Timeout, Status) ->
+    receive
+        {ssh_cm, Conn, {data, Chan, _Type, Data}} ->
+            io:put_chars(Data),
+            stream_loop(Conn, Chan, Timeout, Status);
+        {ssh_cm, Conn, {eof, Chan}} ->
+            stream_loop(Conn, Chan, Timeout, Status);
+        {ssh_cm, Conn, {exit_status, Chan, S}} ->
+            stream_loop(Conn, Chan, Timeout, S);
+        {ssh_cm, Conn, {exit_signal, Chan, _Signal, _ErrMsg, _Lang}} ->
+            stream_loop(Conn, Chan, Timeout, Status);
+        {ssh_cm, Conn, {closed, Chan}} ->
+            {ok, Status}
+    after Timeout ->
+        {error, <<"timed out waiting for remote output">>}
+    end.
 
 close(Conn) ->
     ssh:close(Conn),

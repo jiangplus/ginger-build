@@ -1,10 +1,11 @@
 import ginger/config.{
-  type Builder, type Config, type EgressBackend, type Limit, type Pipeline,
-  type Proxy, type Registry, type Role, type Rolling, type RuntimeBackend,
-  type Secrets, type Step, Acquire, BootApp, BootProxy, Build, Builder, Config,
-  Count, DockerRuntime, Healthcheck, Hook, HookSpec, KamalProxyEgress, Lock,
-  NomadRuntime, Percent, Pipeline, Proxy, Prune, Push, Registry, Release,
-  RemoveApp, Role, Rolling, Secrets, Status, TraefikEgress,
+  type Builder, type CacheMode, type Config, type EgressBackend, type Limit,
+  type Pipeline, type Proxy, type Registry, type Role, type Rolling,
+  type RuntimeBackend, type Secrets, type Step, Acquire, BootApp, BootProxy,
+  Build, Builder, CacheMax, CacheMin, CacheNone, Config, Count, DockerRuntime,
+  Healthcheck, Hook, HookSpec, KamalProxyEgress, Lock, NomadRuntime, Percent,
+  Pipeline, Proxy, Prune, Push, Registry, Release, RemoveApp, Resources, Role,
+  Rolling, Secrets, Status, TraefikEgress,
 }
 import ginger/error.{type GingerError, ConfigError, DecodeError}
 import glaml
@@ -38,8 +39,16 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
   let ssh_user = decode_ssh_user(root)
   use pipelines <- result.try(decode_pipelines(root))
   use #(runtime, egress) <- result.try(decode_runtime_egress(root))
-  let network =
-    optional_string_node(root, "network") |> option.unwrap("ginger")
+  let network = optional_string_node(root, "network") |> option.unwrap("ginger")
+  let traefik_provider =
+    optional_string_node(root, "traefik_provider") |> option.unwrap("docker")
+  let force_pull = optional_bool_node(root, "force_pull", False)
+  use volumes <- result.try(optional_string_list(root, "volumes"))
+  use extra_hosts <- result.try(optional_string_list(root, "extra_hosts"))
+  use labels <- result.try(decode_string_map(root, "labels"))
+  use resources <- result.try(decode_resources(root))
+  use ssh_timeout <- result.try(decode_ssh_timeout(root))
+  use deps <- result.try(optional_string_list(root, "deps"))
 
   Ok(Config(
     service: service,
@@ -57,6 +66,14 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
     runtime: runtime,
     egress: egress,
     network: network,
+    traefik_provider: traefik_provider,
+    force_pull: force_pull,
+    volumes: volumes,
+    extra_hosts: extra_hosts,
+    labels: labels,
+    resources: resources,
+    ssh_timeout: ssh_timeout,
+    deps: deps,
   ))
 }
 
@@ -64,6 +81,58 @@ fn decode_ssh_user(root: glaml.Node) -> String {
   case field(root, "ssh") {
     Ok(ssh) -> optional_string_node(ssh, "user") |> option.unwrap("root")
     Error(_) -> "root"
+  }
+}
+
+/// `ssh.command_timeout` in seconds — the default deadline for every remote
+/// command and hook. 600 s by default (long enough for image pulls and most
+/// on-server builds without hanging forever).
+fn decode_ssh_timeout(root: glaml.Node) -> Result(Int, GingerError) {
+  case field(root, "ssh") {
+    Ok(ssh) -> optional_int(ssh, "command_timeout", 600)
+    Error(_) -> Ok(600)
+  }
+}
+
+fn decode_resources(root: glaml.Node) -> Result(config.Resources, GingerError) {
+  case field(root, "resources") {
+    Error(_) -> Ok(Resources(cpu: 256, memory: 512))
+    Ok(r) -> {
+      use cpu <- result.try(optional_int(r, "cpu", 256))
+      use memory <- result.try(optional_int(r, "memory", 512))
+      Ok(Resources(cpu: cpu, memory: memory))
+    }
+  }
+}
+
+fn optional_string_list(
+  node: glaml.Node,
+  key: String,
+) -> Result(List(String), GingerError) {
+  case field(node, key) {
+    Error(_) -> Ok([])
+    Ok(glaml.NodeSeq(items)) -> Ok(string_seq(items))
+    Ok(_) -> Error(DecodeError(key <> " must be a list of strings"))
+  }
+}
+
+fn decode_string_map(
+  node: glaml.Node,
+  key: String,
+) -> Result(List(#(String, String)), GingerError) {
+  case field(node, key) {
+    Error(_) -> Ok([])
+    Ok(glaml.NodeMap(pairs)) ->
+      list.try_map(pairs, fn(pair) {
+        let #(k, v) = pair
+        use ks <- result.try(node_key_string(k))
+        case scalar_string(v) {
+          Ok(vs) -> Ok(#(ks, vs))
+          Error(_) ->
+            Error(DecodeError(key <> " value for " <> ks <> " must be a scalar"))
+        }
+      })
+    Ok(_) -> Error(DecodeError(key <> " must be a map"))
   }
 }
 
@@ -163,12 +232,69 @@ fn decode_proxy_hosts(p: glaml.Node) -> Result(List(String), GingerError) {
 
 fn decode_builder(root: glaml.Node) -> Result(Builder, GingerError) {
   case field(root, "builder") {
-    Error(_) -> Ok(Builder(arch: "amd64", remote: None))
+    Error(_) ->
+      Ok(Builder(
+        arch: "amd64",
+        remote: None,
+        context: ".",
+        dockerfile: None,
+        tags: [],
+        cache: CacheMin,
+        provenance: False,
+        build_args: [],
+        push_registry: None,
+      ))
     Ok(b) -> {
       let arch = optional_string_node(b, "arch") |> option.unwrap("amd64")
       let remote = optional_string_node(b, "remote")
-      Ok(Builder(arch: arch, remote: remote))
+      let context = optional_string_node(b, "context") |> option.unwrap(".")
+      let dockerfile = optional_string_node(b, "dockerfile")
+      use tags <- result.try(optional_string_list(b, "tags"))
+      use cache <- result.try(decode_cache(b))
+      let provenance = optional_bool_node(b, "provenance", False)
+      let push_registry = optional_string_node(b, "push_registry")
+      use build_args <- result.try(case field(b, "build_args") {
+        Error(_) -> Ok([])
+        Ok(glaml.NodeMap(pairs)) ->
+          list.try_map(pairs, fn(pair) {
+            let #(key, value) = pair
+            use k <- result.try(node_key_string(key))
+            case scalar_string(value) {
+              Ok(v) -> Ok(#(k, v))
+              Error(_) ->
+                Error(DecodeError(
+                  "build_args value for " <> k <> " must be a scalar",
+                ))
+            }
+          })
+        Ok(_) -> Error(DecodeError("build_args must be a map"))
+      })
+      Ok(Builder(
+        arch: arch,
+        remote: remote,
+        context: context,
+        dockerfile: dockerfile,
+        tags: tags,
+        cache: cache,
+        provenance: provenance,
+        build_args: build_args,
+        push_registry: push_registry,
+      ))
     }
+  }
+}
+
+/// `builder.cache: none|min|max` (also accepts `false` for none). Default min.
+fn decode_cache(b: glaml.Node) -> Result(CacheMode, GingerError) {
+  case field(b, "cache") {
+    Error(_) -> Ok(CacheMin)
+    Ok(glaml.NodeBool(False)) -> Ok(CacheNone)
+    Ok(glaml.NodeBool(True)) -> Ok(CacheMin)
+    Ok(glaml.NodeStr("none")) -> Ok(CacheNone)
+    Ok(glaml.NodeStr("min")) -> Ok(CacheMin)
+    Ok(glaml.NodeStr("max")) -> Ok(CacheMax)
+    Ok(_) ->
+      Error(DecodeError("builder.cache must be one of: none, min, max, false"))
   }
 }
 
@@ -349,14 +475,21 @@ fn keyed_step(
 fn decode_hook(value: glaml.Node) -> Result(Step, GingerError) {
   case value {
     // hook: ./bin/foo   → local shell
-    glaml.NodeStr(cmd) -> Ok(Hook(HookSpec(run: cmd, local: True)))
-    // hook: { run: '...', local: true|false }
+    glaml.NodeStr(cmd) ->
+      Ok(Hook(HookSpec(run: cmd, local: True, timeout: None)))
+    // hook: { run: '...', local: true|false, timeout: <seconds> }
     glaml.NodeMap(_) -> {
       use run <- result.try(required_string(value, "run"))
       let local = optional_bool_node(value, "local", True)
-      Ok(Hook(HookSpec(run: run, local: local)))
+      let timeout = case optional_int(value, "timeout", -1) {
+        Ok(-1) -> None
+        Ok(n) -> Some(n)
+        Error(_) -> None
+      }
+      Ok(Hook(HookSpec(run: run, local: local, timeout: timeout)))
     }
-    _ -> Error(DecodeError("hook must be a string or { run, local } map"))
+    _ ->
+      Error(DecodeError("hook must be a string or { run, local, timeout } map"))
   }
 }
 
@@ -372,11 +505,14 @@ fn decode_runtime_egress(
   case runner {
     option.None | option.Some("nomad") ->
       case egress {
-        option.None | option.Some("traefik") -> Ok(#(NomadRuntime, TraefikEgress))
+        option.None | option.Some("traefik") ->
+          Ok(#(NomadRuntime, TraefikEgress))
         option.Some("kamal-proxy") ->
           Error(ConfigError("runner: nomad requires egress: traefik"))
         option.Some(e) ->
-          Error(DecodeError("unknown egress: '" <> e <> "' (valid: kamal-proxy, traefik)"))
+          Error(DecodeError(
+            "unknown egress: '" <> e <> "' (valid: kamal-proxy, traefik)",
+          ))
       }
     option.Some("docker") ->
       case egress {
@@ -385,7 +521,9 @@ fn decode_runtime_egress(
         option.Some("traefik") ->
           Error(ConfigError("runner: docker requires egress: kamal-proxy"))
         option.Some(e) ->
-          Error(DecodeError("unknown egress: '" <> e <> "' (valid: kamal-proxy, traefik)"))
+          Error(DecodeError(
+            "unknown egress: '" <> e <> "' (valid: kamal-proxy, traefik)",
+          ))
       }
     option.Some(r) ->
       Error(DecodeError("unknown runner: '" <> r <> "' (valid: docker, nomad)"))

@@ -29,9 +29,7 @@ pub fn decode_minimal_test() {
 }
 
 pub fn decode_docker_runner_test() {
-  let yaml =
-    minimal
-    <> "\nrunner: docker\negress: kamal-proxy\n"
+  let yaml = minimal <> "\nrunner: docker\negress: kamal-proxy\n"
   let assert Ok(cfg) = decode.from_string(yaml)
   assert cfg.runtime == DockerRuntime
   assert cfg.egress == KamalProxyEgress
@@ -198,11 +196,11 @@ pub fn decode_pipeline_steps_test() {
       Push,
       Lock(Acquire),
       BootProxy,
-      Hook(HookSpec(run: "./bin/check", local: True)),
+      Hook(HookSpec(run: "./bin/check", local: True, timeout: None)),
       BootApp(rolling: True, version: None),
       Prune,
       Lock(Release),
-      Hook(HookSpec(run: "echo done", local: False)),
+      Hook(HookSpec(run: "echo done", local: False, timeout: None)),
     ]
 }
 
@@ -232,4 +230,108 @@ pub fn validate_rejects_bad_service_name_test() {
 pub fn validate_accepts_good_config_test() {
   let assert Ok(cfg) = decode.from_string(minimal)
   let assert Ok(_) = validate.validate(cfg)
+}
+
+// --- 0.6.0 additions ---------------------------------------------------------
+
+pub fn decode_container_passthroughs_test() {
+  let yaml =
+    "
+service: blog
+image: ghcr.io/acme/blog
+servers:
+  web:
+    hosts: [10.0.0.1]
+registry:
+  server: ghcr.io
+volumes:
+  - /opt/data:/data
+extra_hosts:
+  - plc.internal:127.0.0.1
+labels:
+  team: platform
+resources:
+  cpu: 50
+  memory: 400
+ssh:
+  user: ubuntu
+  command_timeout: 1800
+deps:
+  - ../plc.yml
+"
+  let assert Ok(cfg) = decode.from_string(yaml)
+  assert cfg.volumes == ["/opt/data:/data"]
+  assert cfg.extra_hosts == ["plc.internal:127.0.0.1"]
+  assert cfg.labels == [#("team", "platform")]
+  assert cfg.resources == config.Resources(cpu: 50, memory: 400)
+  assert cfg.ssh_timeout == 1800
+  assert cfg.deps == ["../plc.yml"]
+}
+
+pub fn decode_builder_extensions_test() {
+  let yaml =
+    "
+service: blog
+image: ghcr.io/acme/blog
+servers:
+  web:
+    hosts: [10.0.0.1]
+registry:
+  server: ghcr.io
+builder:
+  context: ../repo
+  dockerfile: cmd/relay/Dockerfile
+  tags: [latest]
+  cache: none
+"
+  let assert Ok(cfg) = decode.from_string(yaml)
+  assert cfg.builder.context == "../repo"
+  assert cfg.builder.dockerfile == Some("cmd/relay/Dockerfile")
+  assert cfg.builder.tags == ["latest"]
+  assert cfg.builder.cache == config.CacheNone
+}
+
+pub fn decode_defaults_are_backward_compatible_test() {
+  // a minimal 0.5.0-era config must decode with the new fields defaulted
+  let yaml =
+    "
+service: blog
+image: ghcr.io/acme/blog
+servers:
+  web:
+    hosts: [10.0.0.1]
+registry:
+  server: ghcr.io
+"
+  let assert Ok(cfg) = decode.from_string(yaml)
+  assert cfg.volumes == []
+  assert cfg.extra_hosts == []
+  assert cfg.labels == []
+  assert cfg.resources == config.Resources(cpu: 256, memory: 512)
+  assert cfg.ssh_timeout == 600
+  assert cfg.deps == []
+  assert cfg.builder.context == "."
+  assert cfg.builder.dockerfile == None
+  assert cfg.builder.tags == []
+  assert cfg.builder.cache == config.CacheMin
+}
+
+pub fn decode_hook_timeout_test() {
+  let yaml =
+    "
+service: blog
+image: ghcr.io/acme/blog
+servers:
+  web:
+    hosts: [10.0.0.1]
+registry:
+  server: ghcr.io
+pipelines:
+  deploy:
+    - hook: { run: 'sleep 1', local: false, timeout: 1800 }
+"
+  let assert Ok(cfg) = decode.from_string(yaml)
+  let assert [config.Pipeline(name: "deploy", steps: [step])] = cfg.pipelines
+  assert step
+    == Hook(HookSpec(run: "sleep 1", local: False, timeout: Some(1800)))
 }

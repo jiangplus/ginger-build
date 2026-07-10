@@ -3,7 +3,8 @@ name: ginger
 description: >
   Set up and use ginger — a Gleam/BEAM container deployment tool similar to Kamal.
   Use this skill whenever the user wants to: install ginger, create a ginger.yml,
-  deploy a containerised app with ginger, configure the proxy or secrets, roll back
+  deploy a containerised app with ginger, deploy several services together,
+  configure the proxy or secrets, view logs or deploy history, roll back
   a deployment, or troubleshoot a ginger deploy failure. Also trigger when the user
   mentions "ginger deploy", "ginger.yml", or asks how to get ginger running on a
   new server or project.
@@ -18,6 +19,7 @@ Default stack: **Nomad** (container scheduling) + **Traefik** (traffic routing).
 Alternative: **Docker** + **kamal-proxy** — two YAML lines to switch.
 
 Release page: https://github.com/jiangplus/ginger-build/releases
+Current version: **0.6.0** (see CHANGELOG.md in the repo for what's new).
 
 ---
 
@@ -60,11 +62,12 @@ Download the pre-built escript and make it executable:
 curl -fsSL https://github.com/jiangplus/ginger-build/releases/latest/download/ginger \
   -o ~/.local/bin/ginger
 chmod +x ~/.local/bin/ginger
-ginger version   # should print: ginger 0.2.2
+ginger version   # should print: ginger 0.6.0
 ```
 
-Make sure `~/.local/bin` is on your PATH (add to `~/.bashrc` / `~/.zshrc` / `config.fish`
-if needed).
+Or build from source (requires Gleam and just): `git clone … && cd ginger && just install`.
+
+Make sure the install dir is on your PATH.
 
 ---
 
@@ -103,6 +106,16 @@ proxy:
 
 ssh:
   user: root
+  command_timeout: 600                # seconds; deadline for remote commands/hooks
+
+builder:                              # all optional
+  arch: amd64
+  remote: ssh://docker@builder        # omit to build locally with docker buildx
+  context: .                          # build-context dir; git-sha version comes from here
+  dockerfile: cmd/app/Dockerfile      # relative to context (monorepo builds)
+  tags: [latest]                      # extra tags pushed alongside the version tag
+  cache: min                          # registry build cache: none | min (default) | max
+  provenance: false                   # attestations+SBOM off by default (faster)
 
 env:
   NODE_ENV: production
@@ -112,108 +125,131 @@ secrets:
   inject:
     - GITHUB_TOKEN
     - "DATABASE_*"
+
+# Container plumbing passthroughs (both runtimes; all optional)
+volumes:
+  - /opt/myapp/data:/data
+extra_hosts:
+  - internal.example.com:10.0.0.9
+labels:
+  team: platform
+resources:                            # Nomad task resources (MHz / MB)
+  cpu: 256
+  memory: 512
+
+# Other services this one depends on (for multi-config deploys; paths are
+# relative to THIS config file)
+deps:
+  - ../db/ginger.yml
+
+rolling:
+  limit: 25%                          # hosts per batch: integer or percentage
+  wait: 5                             # seconds between batches
+  parallel_roles: false
+retain_containers: 5
 ```
 
 ### Docker + kamal-proxy
 
-ginger SSHes directly to each host, runs `docker run`, registers with kamal-proxy,
-then stops the old container.
+Same file, plus:
 
 ```yaml
-service: myapp
-image: ghcr.io/myorg/myapp
-
 runner: docker
 egress: kamal-proxy
-
-servers:
-  web:
-    hosts: [10.0.0.1]
-    primary: true
-
-registry:
-  server: ghcr.io
-  username: myorg
-  password: GITHUB_TOKEN
-
 proxy:
   hosts: [myapp.example.com]
   app_port: 3000
-  ssl: true                           # kamal-proxy handles Let's Encrypt
+  ssl: true
   health_check_path: /up
   deploy_timeout: 30
   drain_timeout: 30
-
-ssh:
-  user: root
-
-env:
-  NODE_ENV: production
-
-secrets:
-  load: [.env]
-  inject:
-    - GITHUB_TOKEN
-    - "DATABASE_*"
 ```
 
 **Key questions to ask the user before filling this in:**
 - Nomad+Traefik or Docker+kamal-proxy?
-- What's the service name and Docker image path?
-- What registry do they use (ghcr.io / Docker Hub / self-hosted)?
-- What are the server IPs and SSH user?
-- What domain should the app be reachable at?
-- What port does the container listen on?
-- What secrets need to be injected (API keys, DB passwords)?
+- Service name, image path, registry?
+- Server IPs and SSH user? Domain? Container port?
+- Monorepo? (→ set `builder.context` / `builder.dockerfile`)
+- Do runtime specs pin `:latest`? (→ add `builder.tags: [latest]`)
+- Secrets to inject?
 
 ---
 
 ## Step 4 — Set up secrets
 
 ginger reads secrets from the process environment and `.env` files — never from the
-YAML directly. Before deploying:
+YAML directly:
 
 ```sh
 # .env (gitignored)
 GITHUB_TOKEN=ghp_xxxxxxxxxxxx
-DATABASE_URL=postgres://...
 ```
 
-Or export them in the shell:
-```sh
-export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
-```
-
-Check that all required keys are present — `ginger deploy` will validate this before
-doing anything:
-```sh
-ginger config          # prints parsed config with secrets redacted
-```
+Check with `ginger config -c ginger.yml` (secrets redacted; flags may go anywhere).
 
 ---
 
-## Step 5 — First deploy
+## Step 5 — Deploy
 
 ```sh
-ginger deploy
-```
-
-Default pipeline: build image → push to registry → acquire lock →
-boot proxy (reuse existing Traefik/kamal-proxy or start a new one) →
-deploy containers → prune → release lock.
-
-- **Nomad**: submits the job spec; Nomad handles the container swap.
-- **Docker**: zero-downtime swap via proxy health check, then removes the old container.
-
-**Useful flags:**
-```sh
+ginger deploy                      # build, push, deploy with zero downtime
+ginger deploy -c a.yml -c b.yml    # GROUP deploy: repeat -c for several services;
+                                   #   builds run in parallel (cap 2), deploys
+                                   #   follow each config's deps: order
 ginger deploy --skip-push          # skip build; deploy whatever is in the registry
 ginger deploy --tag v1.2.3         # pin a specific image tag instead of git SHA
 ginger redeploy                    # deploy without touching the proxy or pruning
 ginger rollback <version>          # switch traffic back to an older container
-ginger status                      # show running version and proxy state per host
 ginger remove                      # stop all containers / purge Nomad jobs
+ginger status                      # job/container status per host
+ginger logs [-f] [--tail N]        # service logs per host; -f streams live
+ginger history [--tail N]          # deploy audit log from the primary host
+ginger run <pipeline>              # run a custom named pipeline from ginger.yml
+ginger lock release|status|acquire # deploy mutex management
+ginger config                      # print parsed config (secrets redacted)
 ```
+
+**Global options (any command, any position):**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c, --config <file>` | `ginger.yml` | Config file; repeatable → group deploy |
+| `-P, --skip-push` | false | Skip image build/push |
+| `-t, --tag <version>` | git SHA | Pin the image tag |
+| `--build-concurrency <n>` | 2 | Parallel builds in group deploys (keep modest — builds are memory-hungry) |
+| `-f, --follow` | false | Follow logs |
+| `--tail <n>` | 100 | Lines for `logs` / `history` |
+
+A pipeline in the config with the same name as a command (`status`, `logs`,
+`history`, `deploy`, ...) takes precedence over the built-in behaviour. Any other
+first argument is a custom pipeline name (`ginger run <name>` is the explicit form).
+
+### Multi-service groups
+
+There is deliberately no stack file. Each service keeps its own `ginger.yml`;
+`deps:` entries (paths relative to the config file) link them. Deploying with
+repeated `-c` topo-sorts the set, builds in parallel, deploys sequentially in
+dependency order. Deps pointing outside the deploy set are ignored. The deploy
+lock is per-service, so unrelated services can deploy concurrently.
+
+### Custom pipelines
+
+```yaml
+pipelines:
+  deploy:
+    - build
+    - lock: acquire
+    - hook: { run: 'nomad job run /srv/app.nomad.hcl', local: false, timeout: 900 }
+    - lock: release
+  status:
+    - hook: { run: 'nomad job status myapp | head -40', local: false }
+```
+
+Steps: `build`, `push`, `boot-proxy`, `boot-app`, `remove-app`, `prune`,
+`lock: acquire|release|status`, `hook: <cmd>` (string = local) or
+`hook: { run, local, timeout }` (`local: false` runs on every host; `timeout`
+in seconds overrides `ssh.command_timeout`). Hook output is shown live with a
+`[host]` prefix.
 
 ---
 
@@ -222,72 +258,32 @@ ginger remove                      # stop all containers / purge Nomad jobs
 **"secrets.inject keys not set"** — a key listed under `secrets.inject` is missing or
 empty. Export it or add it to `.env`.
 
-**"SSH error: connect … timeout"** — the server is unreachable or the SSH user/key is
-wrong. Test with `ssh <user>@<host>` directly.
+**"SSH error: connect … timeout"** — server unreachable or wrong SSH user/key.
+Test with `ssh <user>@<host>` directly.
 
-**"deploy lock already held"** — a previous deploy crashed while holding the lock.
-Release it: `ginger lock release`.
+**"deploy lock already held"** — a previous deploy crashed while holding the lock:
+`ginger lock release`.
 
-**Build output streams to the terminal** — this is intentional; `docker buildx` progress
-appears live so you can see layer caching hits and push progress in real time.
+**Nomad deployment failed** — ginger automatically prints the failing allocation's
+last 40 stderr lines. If a task is in crash-loop backoff after a bad image, a plain
+re-run won't recover it — `nomad job stop -purge <job>` then deploy again.
 
-**Traefik/kamal-proxy already running** — ginger detects and reuses any existing proxy on
-the host, so other apps served by that proxy are never disrupted.
+**Monorepo build can't find files** — set `builder.context` to the repo root and
+`builder.dockerfile` relative to it; ginger joins them for docker's cwd-relative `-f`.
 
-**"runner: nomad requires egress: traefik"** — the only valid combinations are
-`nomad+traefik` and `docker+kamal-proxy`. Fix the `runner` / `egress` pair.
+**Dockerfile runs `git describe` / needs `.git`** — don't exclude `.git` in
+`.dockerignore` for that image.
 
----
+**Runtime spec pins `:latest` but deploys use git-sha tags** — add
+`builder.tags: [latest]` so both are pushed; never rely on `--tag latest` alone
+(it destroys rollback history).
 
-## Common ginger.yml patterns
+**Group build failed for one service** — the group aborts before any deploy
+(images already pushed are harmless). Fix and re-run; successful services' builds
+hit the registry cache.
 
-**Multiple servers (rolling update):**
-```yaml
-servers:
-  web:
-    hosts: [10.0.0.1, 10.0.0.2, 10.0.0.3]
-    primary: true
-rolling:
-  limit: 1        # one host at a time
-  wait: 5         # seconds between batches
-```
+**"runner: nomad requires egress: traefik"** — only `nomad+traefik` and
+`docker+kamal-proxy` are valid combinations.
 
-**Background worker role (no proxy routing):**
-```yaml
-servers:
-  web:
-    hosts: [10.0.0.1]
-    primary: true
-  worker:
-    hosts: [10.0.0.2]
-    cmd: bundle exec sidekiq
-```
-
-**Multiple domains on one service:**
-```yaml
-proxy:
-  hosts: [myapp.com, www.myapp.com]
-  app_port: 3000
-  ssl: true
-```
-
-**Remote builder (build on a dedicated Docker host):**
-```yaml
-builder:
-  arch: amd64
-  remote: ssh://docker@builder.example.com
-```
-
-**Custom deploy pipeline:**
-```yaml
-pipelines:
-  deploy:
-    - build
-    - push
-    - lock: acquire
-    - hook: ./bin/check-migrations     # runs locally before deploy
-    - boot-proxy
-    - boot-app: { rolling: true }
-    - prune
-    - lock: release
-```
+**Traefik/kamal-proxy already running** — ginger detects and reuses any existing
+proxy on the host; other apps served by it are never disrupted.

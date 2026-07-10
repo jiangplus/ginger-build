@@ -1,8 +1,7 @@
 import ginger/command
 import ginger/config.{
-  type Config, BootApp, BootProxy, Build, Builder, Config, Count,
-  DockerRuntime, KamalProxyEgress, Proxy, Prune, Registry, Role, Rolling,
-  Secrets,
+  type Config, BootApp, BootProxy, Build, Builder, Config, Count, DockerRuntime,
+  KamalProxyEgress, Proxy, Prune, Registry, Role, Rolling, Secrets,
 }
 import ginger/context.{type Context, Context, Runner}
 import ginger/pipeline
@@ -26,7 +25,17 @@ fn test_config() -> Config {
       deploy_timeout: 30,
       drain_timeout: 30,
     )),
-    builder: Builder(arch: "amd64", remote: None),
+    builder: Builder(
+      arch: "amd64",
+      remote: None,
+      context: ".",
+      dockerfile: None,
+      tags: [],
+      cache: config.CacheMin,
+      provenance: False,
+      build_args: [],
+      push_registry: None,
+    ),
     env: [],
     secrets: Secrets(load: [".env"], inject: []),
     rolling: Rolling(limit: Count(1), wait: 0, parallel_roles: False),
@@ -36,6 +45,14 @@ fn test_config() -> Config {
     runtime: DockerRuntime,
     egress: KamalProxyEgress,
     network: "ginger",
+    traefik_provider: "docker",
+    force_pull: False,
+    volumes: [],
+    extra_hosts: [],
+    labels: [],
+    resources: config.Resources(cpu: 256, memory: 512),
+    ssh_timeout: 600,
+    deps: [],
   )
 }
 
@@ -58,6 +75,14 @@ fn recording_context(sink: Subject(String), existing_proxy: String) -> Context {
   let runner =
     Runner(
       remote: fn(host, cmd) {
+        process.send(sink, "remote:" <> host <> ":" <> command.to_string(cmd))
+        Ok("")
+      },
+      remote_timed: fn(host, cmd, _timeout) {
+        process.send(sink, "remote:" <> host <> ":" <> command.to_string(cmd))
+        Ok("")
+      },
+      remote_streamed: fn(host, cmd, _timeout) {
         process.send(sink, "remote:" <> host <> ":" <> command.to_string(cmd))
         Ok("")
       },
@@ -105,9 +130,20 @@ pub fn deploy_boots_own_proxy_when_none_exists_test() {
   let assert Ok(_) = pipeline.run(ctx, pl)
   let commands = drain(sink, [])
 
-  // build, net, proxy, write-env-file, app-run, rm-env-file, proxy-deploy, prune
-  let assert [build, net, proxy, env_write, app, _env_rm, deploy, prune] =
-    commands
+  // build, net, proxy, write-env-file, app-run, rm-env-file, proxy-deploy,
+  // history-append, prune
+  let assert [
+    build,
+    net,
+    proxy,
+    env_write,
+    app,
+    _env_rm,
+    deploy,
+    history,
+    prune,
+  ] = commands
+  assert string.contains(history, ".ginger/history-blog.log")
   assert string.starts_with(build, "local:docker buildx build --push")
   assert string.contains(net, "docker network create ginger")
   assert string.contains(
@@ -142,6 +178,14 @@ pub fn old_container_is_removed_after_successful_boot_test() {
   let runner =
     context.Runner(
       remote: fn(host, cmd) {
+        process.send(sink, "remote:" <> host <> ":" <> command.to_string(cmd))
+        Ok("")
+      },
+      remote_timed: fn(host, cmd, _timeout) {
+        process.send(sink, "remote:" <> host <> ":" <> command.to_string(cmd))
+        Ok("")
+      },
+      remote_streamed: fn(host, cmd, _timeout) {
         process.send(sink, "remote:" <> host <> ":" <> command.to_string(cmd))
         Ok("")
       },
@@ -222,8 +266,11 @@ pub fn deploy_reuses_existing_proxy_test() {
   let assert Ok(_) = pipeline.run(ctx, pl)
   let commands = drain(sink, [])
 
-  // build, ensure-network, write-env-file, app-run, rm-env-file, proxy-deploy, prune
-  let assert [build, _net, env_write, app, _env_rm, deploy, prune] = commands
+  // build, ensure-network, write-env-file, app-run, rm-env-file, proxy-deploy,
+  // history-append, prune
+  let assert [build, _net, env_write, app, _env_rm, deploy, history, prune] =
+    commands
+  assert string.contains(history, ".ginger/history-blog.log")
   assert string.starts_with(build, "local:docker buildx build --push")
   assert string.contains(env_write, "GINGER_ENV_EOF")
   assert string.contains(app, "docker run --detach")

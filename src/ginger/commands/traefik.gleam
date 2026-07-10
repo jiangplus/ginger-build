@@ -94,20 +94,14 @@ pub fn labels(
     #("traefik.http.routers." <> svc <> ".rule", rule),
     #("traefik.http.routers." <> svc <> ".entrypoints", "web"),
     #("traefik.http.routers." <> svc <> ".service", svc),
-    #(
-      "traefik.http.services." <> svc <> ".loadbalancer.server.port",
-      port,
-    ),
+    #("traefik.http.services." <> svc <> ".loadbalancer.server.port", port),
   ]
   case proxy.ssl {
     False -> base
     True ->
       list.append(base, [
         #("traefik.http.routers." <> svc <> "-tls.rule", rule),
-        #(
-          "traefik.http.routers." <> svc <> "-tls.entrypoints",
-          "websecure",
-        ),
+        #("traefik.http.routers." <> svc <> "-tls.entrypoints", "websecure"),
         #("traefik.http.routers." <> svc <> "-tls.service", svc),
         #("traefik.http.routers." <> svc <> "-tls.tls", "true"),
         #(
@@ -117,4 +111,3 @@ pub fn labels(
       ])
   }
 }
-

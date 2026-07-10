@@ -74,6 +74,28 @@ pub fn exec(
   }
 }
 
+@external(erlang, "ssh_ffi", "exec_stream")
+fn ffi_exec_stream(
+  conn: Connection,
+  cmd: String,
+  timeout_ms: Int,
+) -> Result(Int, String)
+
+/// Execute a command string, printing its output to the operator's terminal
+/// as it arrives. Returns the exit status. The timeout is an inactivity
+/// deadline — it resets whenever the remote produces output.
+pub fn exec_stream(
+  session: Session,
+  command_string: String,
+  timeout_ms: Int,
+) -> Result(Int, GingerError) {
+  case ffi_exec_stream(session.connection, command_string, timeout_ms) {
+    Ok(status) -> Ok(status)
+    Error(reason) ->
+      Error(SshError("exec on " <> session.host <> ": " <> reason))
+  }
+}
+
 /// Close a session. Errors are ignored — teardown is best-effort.
 pub fn close(session: Session) -> Nil {
   let _ = ffi_close(session.connection)
