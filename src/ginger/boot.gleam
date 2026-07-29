@@ -271,9 +271,7 @@ fn boot_host_nomad(
   let version = context.version
   context.log(
     "Submitting Nomad job "
-    <> config.service
-    <> "-"
-    <> role.name
+    <> config.nomad_job_id(config, role.name)
     <> " on "
     <> host
     <> "...",
@@ -290,6 +288,42 @@ fn boot_host_nomad(
     },
   )
 
+  let timeout = case config.proxy {
+    Some(proxy) -> proxy.deploy_timeout
+    None -> 120
+  }
+
+  // Job-template mode: the operator owns the HCL, ginger owns the lifecycle.
+  // Spec generation is skipped entirely — env, labels, ports and resources all
+  // live in their file — but the pre-pull and the health gate still apply.
+  // That gate is the whole point: a `hook: nomad job run ...` returns success
+  // the moment the command exits, so a crash-looping job "deploys" fine.
+  case config.nomad_job {
+    Some(job) -> {
+      use _ <- result.try(context.runner.remote(
+        host,
+        builder_cmd.pull(config, version),
+      ))
+      use _ <- result.try(context.runner.remote(
+        host,
+        nomad_cmd.run_job_file(job, config.image_ref(config, version)),
+      ))
+      wait_nomad_healthy(context, host, config, role, timeout)
+    }
+    option.None ->
+      boot_host_nomad_generated(context, role, host, version, timeout)
+  }
+}
+
+/// The original path: ginger renders the whole job spec from `ginger.yml`.
+fn boot_host_nomad_generated(
+  context: Context,
+  role: Role,
+  host: String,
+  version: String,
+  timeout: Int,
+) -> Result(Context, GingerError) {
+  let config = context.config
   let t_labels = traefik_labels_for(context, role)
   let app_port = case config.proxy {
     Some(proxy) -> proxy.app_port
@@ -328,11 +362,6 @@ fn boot_host_nomad(
       config.network,
     ),
   ))
-
-  let timeout = case config.proxy {
-    Some(proxy) -> proxy.deploy_timeout
-    None -> 120
-  }
 
   wait_nomad_healthy(context, host, config, role, timeout)
 }
@@ -376,10 +405,10 @@ fn do_wait_nomad_healthy(
       case nomad_cmd.parse_deployment_status(output) {
         "successful" -> {
           context.log(
+            // Name it by the job ID actually polled — in job-template mode
+            // that is the operator's job name, not "<service>-<role>".
             "Nomad deployment for "
-            <> config.service
-            <> "-"
-            <> role.name
+            <> config.nomad_job_id(config, role.name)
             <> " is healthy",
           )
           Ok(context)

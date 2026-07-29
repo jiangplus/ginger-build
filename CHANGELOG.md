@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.7.0 — 2026-07-26
+
+Driven by moving the xjdao.xyz stack (8 services, Nomad + Traefik on a single
+Aliyun host) onto ginger. **Backward compatible**: the new `nomad:` block is
+optional and absent means exactly 0.6.0 behaviour.
+
+### Nomad job-template mode (`IMPROVEMENTS.md` §3.2)
+
+Deploy a hand-written Nomad job spec instead of the one ginger generates:
+
+```yaml
+runner: nomad
+nomad:
+  job_file: /srv/xjdao/deploy/nomad/social-app.nomad.hcl  # path on the deploy host
+  job_id: social-app        # optional, defaults to `service`
+  image_var: image          # optional, defaults to "image"
+```
+
+ginger logs into the registry, pre-pulls the image, then runs
+`nomad job run -var <image_var>=<repo>:<sha> <job_file>` and **health-gates the
+deployment** exactly as it does for generated specs — polling
+`nomad job deployments -latest` and dumping the failing allocation's stderr on
+failure.
+
+Why this matters: the previous way to deploy a real job spec was
+`hook: nomad job run … && nomad job restart …`. A hook reports success the
+moment the command exits, so a job whose allocations crash-loop still
+"deploys" successfully. Job-template mode keeps the operator's HCL *and*
+ginger's health gate.
+
+Passing the image as an HCL2 variable also sidesteps the `:latest` no-op trap —
+a sha-tagged ref changes the job definition every deploy, so Nomad actually
+rolls it out instead of treating the submission as unchanged. The spec must
+declare the variable:
+
+```hcl
+variable "image" { type = string }
+task "web" { config { image = var.image } }
+```
+
+`job_id` exists because a hand-written spec is named whatever `job "..."` the
+operator wrote, not `<service>-<role>`; status, logs and the health gate all
+address that ID.
+
+### `deploy_only: true`
+
+For services whose image comes from elsewhere (an upstream registry, another
+pipeline), drop `Build`/`Push` from every pipeline — the same effect as
+`--skip-push`, but declared once in the config:
+
+```yaml
+deploy_only: true
+```
+
+Previously such a service either failed in `docker buildx` (no build context)
+or forced the operator to hand-write a pipeline just to omit two steps. Note
+that without a `builder.context` ginger cannot derive a version from git, so
+these configs need an explicit `-t <tag>`.
+
+### `ginger config`
+
+Now prints the resolved job-template settings, so it is possible to tell at a
+glance whether a config deploys its own spec or ginger's generated one.
+
 ## 0.6.0 — 2026-07-02
 
 Driven by deploying a real 6-service AT Protocol stack (see `IMPROVEMENTS.md`

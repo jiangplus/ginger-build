@@ -1,5 +1,5 @@
 import gleam/list
-import gleam/option.{type Option}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 
 /// Container runtime used on the servers.
@@ -63,12 +63,61 @@ pub type Config {
     // this config file's directory. Used by multi-config deploys to order
     // services; a dep that isn't part of the deploy set is ignored.
     deps: List(String),
+    // Set to deploy a hand-written Nomad job spec instead of ginger's generated
+    // one. Only meaningful with `runner: nomad`. See `NomadJob`.
+    nomad_job: Option(NomadJob),
+    // This service has no source to build — its image comes from elsewhere
+    // (an upstream registry, another pipeline). `Build`/`Push` are dropped from
+    // every pipeline, exactly as `--skip-push` does, so `ginger deploy` means
+    // "roll out the image that is already in the registry".
+    //
+    // Without this, a deploy-only service either fails in `docker buildx` (no
+    // build context) or forces the operator to hand-write a pipeline just to
+    // omit two steps.
+    deploy_only: Bool,
   )
 }
 
+/// Job-template mode: deploy a hand-written Nomad job spec instead of the one
+/// ginger generates.
+///
+/// ginger's generated spec covers a single container with dynamic ports and a
+/// fixed shape. Real jobs often need static ports, `template` blocks reading
+/// `nomadVar`, multiple tasks, host volumes — things a passthrough field set
+/// can never fully cover. In job-template mode the operator owns the HCL and
+/// ginger owns only the lifecycle: substitute the image reference, submit the
+/// job, and health-gate the deployment.
+///
+/// This deliberately keeps ginger's health gate, which is what a
+/// `hook: nomad job run ...` loses — a hook reports success as soon as the
+/// command exits, so a job whose allocations crash-loop still "deploys".
+///
+/// `job_file` is a path **on the deploy host**. `image_var` names the HCL2
+/// variable ginger passes the image reference to, so the spec must declare:
+///
+/// ```hcl
+/// variable "image" { type = string }
+/// ...
+/// config { image = var.image }
+/// ```
+///
+/// Passing the image as a variable also sidesteps the `:latest` no-op trap:
+/// a sha-tagged image ref changes the job definition every deploy, so Nomad
+/// actually rolls it out instead of treating the submission as unchanged.
+pub type NomadJob {
+  NomadJob(job_file: String, job_id: Option(String), image_var: String)
+}
+
 /// Nomad task resource reservation.
+///
+/// `memory` is the guaranteed reservation (Nomad `MemoryMB`). `memory_max`
+/// opts the task into memory over-provisioning: when greater than `memory`
+/// it becomes Nomad's `MemoryMaxMB`, letting the task burst above its
+/// reservation up to this ceiling on a host that has spare memory (requires
+/// the cluster's memory oversubscription to be enabled). `0` disables it —
+/// the task is capped at its reservation.
 pub type Resources {
-  Resources(cpu: Int, memory: Int)
+  Resources(cpu: Int, memory: Int, memory_max: Int)
 }
 
 /// Registry-cache export policy for `docker buildx build`.
@@ -236,6 +285,18 @@ pub fn container_name(
 /// kamal-proxy service identifier and for label filters.
 pub fn container_prefix(config: Config, role_name: String) -> String {
   config.service <> "-" <> role_name
+}
+
+/// The Nomad job ID to address for status / logs / deployment polling.
+///
+/// Generated specs are named `<service>-<role>`; a hand-written spec has
+/// whatever `job "..."` the operator wrote, so job-template mode may override
+/// it. Defaults to the service name, which is the common case.
+pub fn nomad_job_id(config: Config, role_name: String) -> String {
+  case config.nomad_job {
+    Some(job) -> option.unwrap(job.job_id, config.service)
+    None -> container_prefix(config, role_name)
+  }
 }
 
 /// The full `repository:tag` reference for the built image.

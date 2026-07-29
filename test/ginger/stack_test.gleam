@@ -38,9 +38,11 @@ fn cfg(service: String, deps: List(String)) -> config.Config {
     volumes: [],
     extra_hosts: [],
     labels: [],
-    resources: config.Resources(cpu: 256, memory: 512),
+    resources: config.Resources(cpu: 256, memory: 512, memory_max: 0),
     ssh_timeout: 600,
     deps: deps,
+    nomad_job: None,
+    deploy_only: False,
   )
 }
 

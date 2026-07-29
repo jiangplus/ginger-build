@@ -1,11 +1,11 @@
 import ginger/config.{
   type Builder, type CacheMode, type Config, type EgressBackend, type Limit,
-  type Pipeline, type Proxy, type Registry, type Role, type Rolling,
-  type RuntimeBackend, type Secrets, type Step, Acquire, BootApp, BootProxy,
-  Build, Builder, CacheMax, CacheMin, CacheNone, Config, Count, DockerRuntime,
-  Healthcheck, Hook, HookSpec, KamalProxyEgress, Lock, NomadRuntime, Percent,
-  Pipeline, Proxy, Prune, Push, Registry, Release, RemoveApp, Resources, Role,
-  Rolling, Secrets, Status, TraefikEgress,
+  type NomadJob, type Pipeline, type Proxy, type Registry, type Role,
+  type Rolling, type RuntimeBackend, type Secrets, type Step, Acquire, BootApp,
+  BootProxy, Build, Builder, CacheMax, CacheMin, CacheNone, Config, Count,
+  DockerRuntime, Healthcheck, Hook, HookSpec, KamalProxyEgress, Lock, NomadJob,
+  NomadRuntime, Percent, Pipeline, Proxy, Prune, Push, Registry, Release,
+  RemoveApp, Resources, Role, Rolling, Secrets, Status, TraefikEgress,
 }
 import ginger/error.{type GingerError, ConfigError, DecodeError}
 import glaml
@@ -49,6 +49,8 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
   use resources <- result.try(decode_resources(root))
   use ssh_timeout <- result.try(decode_ssh_timeout(root))
   use deps <- result.try(optional_string_list(root, "deps"))
+  use nomad_job <- result.try(decode_nomad_job(root))
+  let deploy_only = optional_bool_node(root, "deploy_only", False)
 
   Ok(Config(
     service: service,
@@ -74,7 +76,30 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
     resources: resources,
     ssh_timeout: ssh_timeout,
     deps: deps,
+    nomad_job: nomad_job,
+    deploy_only: deploy_only,
   ))
+}
+
+/// ```yaml
+/// nomad:
+///   job_file: /srv/xjdao/deploy/nomad/social-app.nomad.hcl
+///   job_id: social-app     # optional, defaults to `service`
+///   image_var: image       # optional, defaults to "image"
+/// ```
+fn decode_nomad_job(root: glaml.Node) -> Result(Option(NomadJob), GingerError) {
+  case field(root, "nomad") {
+    Error(_) -> Ok(None)
+    Ok(node) -> {
+      use job_file <- result.try(required_string(node, "job_file"))
+      let job_id = optional_string_node(node, "job_id")
+      let image_var =
+        optional_string_node(node, "image_var") |> option.unwrap("image")
+      Ok(
+        Some(NomadJob(job_file: job_file, job_id: job_id, image_var: image_var)),
+      )
+    }
+  }
 }
 
 fn decode_ssh_user(root: glaml.Node) -> String {
@@ -96,11 +121,12 @@ fn decode_ssh_timeout(root: glaml.Node) -> Result(Int, GingerError) {
 
 fn decode_resources(root: glaml.Node) -> Result(config.Resources, GingerError) {
   case field(root, "resources") {
-    Error(_) -> Ok(Resources(cpu: 256, memory: 512))
+    Error(_) -> Ok(Resources(cpu: 256, memory: 512, memory_max: 0))
     Ok(r) -> {
       use cpu <- result.try(optional_int(r, "cpu", 256))
       use memory <- result.try(optional_int(r, "memory", 512))
-      Ok(Resources(cpu: cpu, memory: memory))
+      use memory_max <- result.try(optional_int(r, "memory_max", 0))
+      Ok(Resources(cpu: cpu, memory: memory, memory_max: memory_max))
     }
   }
 }

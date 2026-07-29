@@ -54,9 +54,11 @@ fn test_config() -> Config {
     volumes: [],
     extra_hosts: [],
     labels: [],
-    resources: config.Resources(cpu: 256, memory: 512),
+    resources: config.Resources(cpu: 256, memory: 512, memory_max: 0),
     ssh_timeout: 600,
     deps: [],
+    nomad_job: None,
+    deploy_only: False,
   )
 }
 

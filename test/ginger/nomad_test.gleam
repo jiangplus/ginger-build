@@ -1,8 +1,8 @@
 import ginger/command
 import ginger/commands/nomad
 import ginger/config.{
-  type Config, type Role, Builder, Config, Count, NomadRuntime, Proxy, Registry,
-  Role, Rolling, Secrets, TraefikEgress,
+  type Config, type Role, Builder, Config, Count, NomadJob, NomadRuntime, Proxy,
+  Registry, Role, Rolling, Secrets, TraefikEgress,
 }
 import gleam/dynamic/decode
 import gleam/json
@@ -52,9 +52,11 @@ fn test_config() -> Config {
     volumes: [],
     extra_hosts: [],
     labels: [],
-    resources: config.Resources(cpu: 256, memory: 512),
+    resources: config.Resources(cpu: 256, memory: 512, memory_max: 0),
     ssh_timeout: 600,
     deps: [],
+    nomad_job: None,
+    deploy_only: False,
   )
 }
 
@@ -239,6 +241,24 @@ pub fn job_spec_services_absent_when_no_proxy_test() {
   assert string.contains(raw, "\"Services\"") == False
 }
 
+pub fn job_spec_memory_max_absent_by_default_test() {
+  // With memory_max: 0 the task is capped at its reservation — no MemoryMaxMB.
+  let raw = run_cmd([], [], None, "ginger")
+  assert string.contains(raw, "\"MemoryMB\":512")
+  assert string.contains(raw, "MemoryMaxMB") == False
+}
+
+pub fn job_spec_memory_max_emitted_when_set_test() {
+  // memory_max above the reservation opts into over-provisioning.
+  let cfg = Config(..test_config(), resources: config.Resources(256, 512, 1024))
+  let raw =
+    nomad.run_job(cfg, web_role(), "abc123", [], [], 3000, None, "ginger")
+    |> command.to_string
+    |> extract_json_body
+  assert string.contains(raw, "\"MemoryMB\":512")
+  assert string.contains(raw, "\"MemoryMaxMB\":1024")
+}
+
 // ---------------------------------------------------------------------------
 // parse_deployment_status unit tests
 
@@ -265,4 +285,89 @@ pub fn parse_deployment_status_empty_returns_pending_test() {
 pub fn parse_deployment_status_no_status_line_returns_pending_test() {
   let output = "ID = abc\nJob ID = blog-web\n"
   assert nomad.parse_deployment_status(output) == "pending"
+}
+
+// --- job-template mode (nomad.job_file) ------------------------------------
+
+fn job_template_config() -> Config {
+  let base = test_config()
+  Config(
+    ..base,
+    nomad_job: Some(NomadJob(
+      job_file: "/srv/xjdao/deploy/nomad/social-app.nomad.hcl",
+      job_id: Some("social-app"),
+      image_var: "image",
+    )),
+  )
+}
+
+pub fn run_job_file_passes_image_as_hcl_var_test() {
+  let job =
+    NomadJob(
+      job_file: "/srv/app/web.nomad.hcl",
+      job_id: None,
+      image_var: "image",
+    )
+  let rendered =
+    nomad.run_job_file(job, "reg.example.com/app:abc1234")
+    |> command.to_string
+  assert string.contains(rendered, "nomad job run")
+  assert string.contains(rendered, "-var")
+  assert string.contains(rendered, "image=reg.example.com/app:abc1234")
+  assert string.contains(rendered, "/srv/app/web.nomad.hcl")
+}
+
+pub fn run_job_file_honours_custom_image_var_test() {
+  let job =
+    NomadJob(
+      job_file: "/srv/app/web.nomad.hcl",
+      job_id: None,
+      image_var: "container_image",
+    )
+  let rendered =
+    nomad.run_job_file(job, "reg.example.com/app:abc1234")
+    |> command.to_string
+  assert string.contains(
+    rendered,
+    "container_image=reg.example.com/app:abc1234",
+  )
+}
+
+// The health gate polls by job ID. A hand-written spec is named whatever the
+// operator wrote, not "<service>-<role>" — getting this wrong means ginger
+// polls a job that does not exist and every deploy times out.
+pub fn job_template_status_uses_custom_job_id_test() {
+  let rendered =
+    nomad.status_job(job_template_config(), "web") |> command.to_string
+  assert string.contains(rendered, "social-app")
+  assert !string.contains(rendered, "blog-web")
+}
+
+pub fn job_template_deployment_status_uses_custom_job_id_test() {
+  let rendered =
+    nomad.deployment_status(job_template_config(), "web") |> command.to_string
+  assert string.contains(rendered, "social-app")
+}
+
+pub fn job_template_job_id_defaults_to_service_test() {
+  let base = test_config()
+  let config =
+    Config(
+      ..base,
+      nomad_job: Some(NomadJob(
+        job_file: "/srv/app/web.nomad.hcl",
+        job_id: None,
+        image_var: "image",
+      )),
+    )
+  let rendered = nomad.status_job(config, "web") |> command.to_string
+  assert string.contains(rendered, "blog")
+  assert !string.contains(rendered, "blog-web")
+}
+
+// Without the nomad block nothing changes: generated specs keep the
+// "<service>-<role>" convention.
+pub fn generated_mode_job_id_unchanged_test() {
+  let rendered = nomad.status_job(test_config(), "web") |> command.to_string
+  assert string.contains(rendered, "blog-web")
 }

@@ -121,6 +121,16 @@ servers:
     hosts: [10.0.0.4]
     cmd: bundle exec sidekiq    # override the container CMD
 
+volumes: ["data:/var/lib/app"]  # host:container mounts (both runtimes)
+extra_hosts: ["db.internal:10.0.0.5"]  # /etc/hosts entries (both runtimes)
+labels:                         # free-form container/task labels
+  team: platform
+
+resources:                      # Nomad task resources (docker runner ignores this)
+  cpu: 256                      # MHz, default 256
+  memory: 512                   # MB reservation, default 512
+  memory_max: 0                 # MB burst ceiling; 0 disables oversubscription
+
 registry:
   server: ghcr.io
   username: acme-ci
@@ -145,6 +155,15 @@ builder:
   tags: [latest]                # extra tags pushed alongside the version tag
   cache: min                    # registry build cache: none | min (default) | max
   provenance: false             # attestations+SBOM off by default (faster export)
+
+deploy_only: true                # no build context; roll out the image already
+                                  # in the registry (drops build/push from every
+                                  # pipeline). Requires an explicit -t <tag>.
+
+nomad:                          # job-template mode: deploy a hand-written spec
+  job_file: /srv/app/deploy/nomad/app.nomad.hcl  # path on the deploy host
+  job_id: app                   # optional, defaults to `service`
+  image_var: image              # optional, defaults to "image"
 
 env:                            # plain env vars baked into every container
   RAILS_ENV: production
@@ -196,6 +215,42 @@ old container.
 **Docker + kamal-proxy**: ginger SSHes to each host, runs `docker run` directly,
 then calls `kamal-proxy deploy` to perform a health-gated traffic switch, and finally
 stops and removes the old container.
+
+### Nomad job-template mode
+
+For Nomad jobs that need static ports, `template` blocks, multiple tasks, or
+host volumes — beyond what ginger's generated spec and passthrough fields can
+express — deploy a hand-written job spec instead:
+
+```yaml
+runner: nomad
+nomad:
+  job_file: /srv/app/deploy/nomad/app.nomad.hcl  # path on the deploy host
+  job_id: app          # optional, defaults to `service`
+  image_var: image     # optional, defaults to "image"
+```
+
+ginger logs into the registry, pre-pulls the image, then runs
+`nomad job run -var <image_var>=<repo>:<sha> <job_file>` and health-gates the
+deployment exactly as for generated specs — polling `nomad job deployments
+-latest` and dumping the failing allocation's stderr on failure. This is
+stronger than `hook: nomad job run ...`, which reports success as soon as the
+command exits even if the job then crash-loops.
+
+The spec must declare the image as an HCL2 variable:
+
+```hcl
+variable "image" { type = string }
+task "web" { config { image = var.image } }
+```
+
+Passing the image as a variable also sidesteps the `:latest` no-op trap — a
+sha-tagged ref changes the job definition every deploy, so Nomad actually
+rolls it out instead of treating the submission as unchanged.
+
+`job_id` matters because a hand-written spec is named whatever `job "..."`
+the operator wrote, not `<service>-<role>`; `status`, `logs`, and the health
+gate all address that ID.
 
 ### Pipeline steps
 
@@ -253,7 +308,7 @@ proxy:
 
 ```sh
 gleam run -- <command>        # run without installing
-gleam test                    # run the test suite (96 tests)
+gleam test                    # run the test suite (127 tests)
 gleam format src test         # format
 just build                    # gleam build
 just escript                  # gleam export escript → ./ginger (single-file binary)
@@ -266,8 +321,9 @@ just install                  # build escript and copy to ~/bin/ginger
 |------|---------------|
 | `test/ginger/config_test.gleam` | YAML decode, runner/egress validation, default values |
 | `test/ginger/commands_test.gleam` | Command string rendering: builder, app, proxy, registry, lock, prune |
-| `test/ginger/nomad_test.gleam` | Nomad job spec structure (JSON validity, labels array shape, Env, auth, Services, deadlines), `parse_deployment_status` |
+| `test/ginger/nomad_test.gleam` | Nomad job spec structure (JSON validity, labels array shape, Env, auth, Services, deadlines), job-template mode, `parse_deployment_status` |
 | `test/ginger/pipeline_test.gleam` | Pipeline interpreter with a fake executor: command ordering, proxy reuse |
+| `test/ginger/stack_test.gleam` | Multi-config `deps:` ordering and cycle detection for group deploys |
 | `test/ginger/rolling_test.gleam` | Batch-size calculation for int and `%` limits |
 | `test/ginger/secrets_test.gleam` | Env merge, glob expansion, dotenv edge cases |
 | `test/ginger/boot_test.gleam` | `parse_old_version` |
@@ -276,7 +332,7 @@ just install                  # build escript and copy to ~/bin/ginger
 
 - **Nomad + Traefik (default)** / **Docker + kamal-proxy** — two valid combinations; mixing them is a config error caught at parse time.
 - **Typed Nomad job spec** — `commands/nomad.gleam` builds JSON via `gleam_json`; no hand-rolled string concatenation. The `labels` shape (list-of-map), `Env` map, `auth` block, `Services` health check, and `ProgressDeadline` are all type-checked.
-- **Health gating** — after `nomad job run`, ginger polls `nomad job deployments -latest` every 3 s until `successful`/`failed`/timeout; the Nomad job spec carries a matching `ProgressDeadline` so Nomad's own timeout agrees with ginger's.
+- **Health gating** — after `nomad job run`, ginger polls `nomad job deployments -latest` every 3 s until `successful`/`failed`/timeout; the Nomad job spec carries a matching `ProgressDeadline` so Nomad's own timeout agrees with ginger's. Job-template mode gets the same health gate, addressed by `job_id`.
 - **Registry build cache** — `docker buildx build` always passes `--cache-from/--cache-to type=registry,ref=<image>:buildcache`; cache survives builder restarts.
 - **redeploy skips build** — `ginger redeploy` deploys the image already in the registry; use `ginger deploy` to rebuild.
 

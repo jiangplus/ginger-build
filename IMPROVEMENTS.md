@@ -7,7 +7,8 @@
 > `resources` passthroughs, remote hook output display, `ssh.command_timeout`
 > + per-hook `timeout:`, failed-deployment alloc-log auto-fetch,
 > `ginger logs [-f]`, deploy history + `ginger history`, flags-anywhere CLI,
-> pipeline-first `status`/`logs`/`history`. Deliberately NOT built: a
+> pipeline-first `status`/`logs`/`history`. **0.7.0** adds job-template mode
+(§3.2). Deliberately NOT built: a
 > multi-service stack file — independent per-service configs with `deps:`
 > references cover the greenfield case without a new config format; revisit
 > only if a real stack outgrows that (e.g. shared env blocks or cross-service
@@ -112,8 +113,10 @@ Two-tier fix:
 
 1. **Passthrough fields** for common needs: `resources: {cpu, memory}`,
    `volumes: []`, `extra_hosts: []`, `static_port`, `datacenters`.
-2. **Job-template mode**: when a spec needs anything more, let the user point
-   at their own HCL and have ginger own only the lifecycle:
+2. **Job-template mode** — ✅ **shipped in 0.7.0** as the `nomad:` block
+   (`job_file` / `job_id` / `image_var`); see `CHANGELOG.md`. The design below
+   is what was built, with the image passed as an HCL2 `-var` rather than a
+   Nomad variable. Original proposal:
 
    ```yaml
    nomad:

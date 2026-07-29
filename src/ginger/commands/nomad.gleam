@@ -1,5 +1,7 @@
 import ginger/command.{type Command}
-import ginger/config.{type Config, type Role, container_prefix, image_ref}
+import ginger/config.{
+  type Config, type NomadJob, type Role, image_ref, nomad_job_id,
+}
 import gleam/int
 import gleam/json
 import gleam/list
@@ -34,6 +36,23 @@ pub fn run_job(
       network,
     )
   command.raw("nomad job run -json - << 'NOMAD_EOF'\n" <> j <> "\nNOMAD_EOF")
+}
+
+/// Job-template mode: submit the operator's own HCL spec, passing the image
+/// reference as an HCL2 variable.
+///
+/// `-detach` is deliberately NOT used: `nomad job run` blocks until the
+/// deployment settles, and ginger's health gate polls afterwards anyway. The
+/// blocking form also surfaces plan/parse errors as a non-zero exit.
+pub fn run_job_file(job: NomadJob, image_ref: String) -> Command {
+  command.run([
+    "nomad",
+    "job",
+    "run",
+    "-var",
+    job.image_var <> "=" <> image_ref,
+    job.job_file,
+  ])
 }
 
 /// Gracefully stop (drain) a Nomad job and remove it from state.
@@ -95,7 +114,7 @@ pub fn alloc_logs(config: Config, role_name: String, lines: Int) -> Command {
 // ---------------------------------------------------------------------------
 
 fn job_id(config: Config, role_name: String) -> String {
-  container_prefix(config, role_name)
+  nomad_job_id(config, role_name)
 }
 
 fn job_json(
@@ -297,13 +316,7 @@ fn job_json(
                             list.map(all_env, fn(p) { #(p.0, json.string(p.1)) }),
                           ),
                         ),
-                        #(
-                          "Resources",
-                          json.object([
-                            #("CPU", json.int(config.resources.cpu)),
-                            #("MemoryMB", json.int(config.resources.memory)),
-                          ]),
-                        ),
+                        #("Resources", json.object(resource_fields(config))),
                       ]),
                     ]),
                   ),
@@ -316,6 +329,23 @@ fn job_json(
       ),
     ]),
   )
+}
+
+/// Build the Nomad `Resources` block. `MemoryMaxMB` is only emitted when
+/// `resources.memory_max` is set above the reservation, opting the task into
+/// memory over-provisioning; otherwise the task is capped at its reservation.
+fn resource_fields(config: Config) -> List(#(String, json.Json)) {
+  let base = [
+    #("CPU", json.int(config.resources.cpu)),
+    #("MemoryMB", json.int(config.resources.memory)),
+  ]
+  case config.resources.memory_max > config.resources.memory {
+    True ->
+      list.append(base, [
+        #("MemoryMaxMB", json.int(config.resources.memory_max)),
+      ])
+    False -> base
+  }
 }
 
 /// Parse the deployment status out of `nomad job deployments -latest` output.

@@ -253,6 +253,7 @@ labels:
 resources:
   cpu: 50
   memory: 400
+  memory_max: 800
 ssh:
   user: ubuntu
   command_timeout: 1800
@@ -263,7 +264,8 @@ deps:
   assert cfg.volumes == ["/opt/data:/data"]
   assert cfg.extra_hosts == ["plc.internal:127.0.0.1"]
   assert cfg.labels == [#("team", "platform")]
-  assert cfg.resources == config.Resources(cpu: 50, memory: 400)
+  assert cfg.resources
+    == config.Resources(cpu: 50, memory: 400, memory_max: 800)
   assert cfg.ssh_timeout == 1800
   assert cfg.deps == ["../plc.yml"]
 }
@@ -307,7 +309,7 @@ registry:
   assert cfg.volumes == []
   assert cfg.extra_hosts == []
   assert cfg.labels == []
-  assert cfg.resources == config.Resources(cpu: 256, memory: 512)
+  assert cfg.resources == config.Resources(cpu: 256, memory: 512, memory_max: 0)
   assert cfg.ssh_timeout == 600
   assert cfg.deps == []
   assert cfg.builder.context == "."
@@ -334,4 +336,118 @@ pipelines:
   let assert [config.Pipeline(name: "deploy", steps: [step])] = cfg.pipelines
   assert step
     == Hook(HookSpec(run: "sleep 1", local: False, timeout: Some(1800)))
+}
+
+// --- nomad job-template mode ------------------------------------------------
+
+pub fn nomad_job_file_decoded_test() {
+  let yaml =
+    "service: social-app
+image: registry.juluo.xyz/xjdao/social-app
+runner: nomad
+egress: traefik
+servers:
+  web:
+    hosts: [121.41.70.29]
+    primary: true
+registry:
+  server: registry.juluo.xyz
+  username: username
+  password: YATCH_TOKEN
+nomad:
+  job_file: /srv/xjdao/deploy/nomad/social-app.nomad.hcl
+  job_id: social-app
+  image_var: container_image
+"
+  let assert Ok(config) = decode.from_string(yaml)
+  let assert Some(job) = config.nomad_job
+  assert job.job_file == "/srv/xjdao/deploy/nomad/social-app.nomad.hcl"
+  assert job.job_id == Some("social-app")
+  assert job.image_var == "container_image"
+}
+
+pub fn nomad_job_image_var_defaults_to_image_test() {
+  let yaml =
+    "service: social-app
+image: registry.juluo.xyz/xjdao/social-app
+runner: nomad
+egress: traefik
+servers:
+  web:
+    hosts: [121.41.70.29]
+    primary: true
+registry:
+  server: registry.juluo.xyz
+  username: username
+  password: YATCH_TOKEN
+nomad:
+  job_file: /srv/xjdao/deploy/nomad/social-app.nomad.hcl
+"
+  let assert Ok(config) = decode.from_string(yaml)
+  let assert Some(job) = config.nomad_job
+  assert job.image_var == "image"
+  assert job.job_id == None
+}
+
+pub fn nomad_job_absent_by_default_test() {
+  let yaml =
+    "service: blog
+image: ghcr.io/acme/blog
+servers:
+  web:
+    hosts: [10.0.0.1]
+    primary: true
+registry:
+  server: ghcr.io
+  username: ci
+  password: TOKEN
+"
+  let assert Ok(config) = decode.from_string(yaml)
+  assert config.nomad_job == None
+}
+
+pub fn nomad_block_without_job_file_is_an_error_test() {
+  let yaml =
+    "service: blog
+image: ghcr.io/acme/blog
+servers:
+  web:
+    hosts: [10.0.0.1]
+    primary: true
+registry:
+  server: ghcr.io
+  username: ci
+  password: TOKEN
+nomad:
+  job_id: blog
+"
+  assert case decode.from_string(yaml) {
+    Error(_) -> True
+    Ok(_) -> False
+  }
+}
+
+pub fn deploy_only_decoded_test() {
+  let yaml =
+    "service: pds
+image: registry.juluo.xyz/xjdao/pds
+runner: nomad
+egress: traefik
+deploy_only: true
+servers:
+  web:
+    hosts: [121.41.70.29]
+    primary: true
+registry:
+  server: registry.juluo.xyz
+  username: username
+  password: YATCH_TOKEN
+"
+  let assert Ok(config) = decode.from_string(yaml)
+  assert config.deploy_only == True
+}
+
+pub fn deploy_only_defaults_false_test() {
+  let assert Ok(config) = decode.from_string(minimal)
+  assert config.deploy_only == False
 }

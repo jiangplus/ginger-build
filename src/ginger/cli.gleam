@@ -25,7 +25,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 
-const version_string = "ginger 0.6.0"
+const version_string = "ginger 0.7.0"
 
 /// Global flags, accepted anywhere on the command line — `ginger -c x deploy`
 /// and `ginger deploy -c x` are equivalent (0.5.0 silently ignored flags
@@ -216,7 +216,9 @@ fn do_execute(
   use config <- result.try(load_config(config_path))
   use context <- result.try(build_context(config, version_override))
   use base <- result.try(deploy.select_pipeline(config, name))
-  let selected = case skip_push {
+  // `deploy_only: true` in the config has the same effect as `--skip-push`:
+  // there is nothing to build, so roll out what is already in the registry.
+  let selected = case skip_push || config.deploy_only {
     True -> deploy.without_build(base)
     False -> base
   }
@@ -367,6 +369,21 @@ fn render_config(config: Config) -> String {
     None -> "proxy: (none)"
   }
 
+  // Job-template mode changes what `deploy` actually does, so surface it here —
+  // otherwise `ginger config` looks identical whether or not the spec ginger
+  // generates is being used at all.
+  let nomad_line = case config.nomad_job {
+    Some(job) ->
+      "nomad job file: "
+      <> job.job_file
+      <> " (job id: "
+      <> option.unwrap(job.job_id, config.service)
+      <> ", image var: "
+      <> job.image_var
+      <> ")"
+    None -> "nomad job file: (none — ginger generates the spec)"
+  }
+
   string.join(
     [
       "service: " <> config.service,
@@ -378,6 +395,7 @@ fn render_config(config: Config) -> String {
         <> config.registry.password
         <> ")",
       proxy_line,
+      nomad_line,
       "roles:",
       roles,
       "inject secrets: " <> string.join(config.secrets.inject, ", "),
