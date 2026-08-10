@@ -15,28 +15,24 @@ description: >
 ginger is a single-binary deployment tool (Gleam/OTP escript) that builds a Docker
 image, pushes it to a registry, and rolls it out over SSH with zero downtime.
 
-Default stack: **Nomad** (container scheduling) + **Traefik** (traffic routing).
-Alternative: **Docker** + **kamal-proxy** — two YAML lines to switch.
+Stack: **Nomad** (scheduling) + **Traefik** (routing). This is the default and the
+only combination this skill covers — use it.
 
 Release page: https://github.com/jiangplus/ginger-build/releases
-Current version: **0.6.0** (see CHANGELOG.md in the repo for what's new).
+Current version: **0.7.0** (see CHANGELOG.md in the repo for what's new).
 
 ---
 
 ## Step 1 — Install Erlang/OTP 27+
 
-ginger is an escript and needs Erlang on the operator machine. OTP 27 is the minimum.
+ginger is an escript and needs Erlang on the operator machine (OTP 27 minimum).
+Check first:
 
-**Detect what's installed first:**
 ```sh
 erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
 ```
-If this prints 27, 28, or 29 — skip to Step 2.
 
-**macOS**
-```sh
-brew install erlang
-```
+**macOS:** `brew install erlang`
 
 **Ubuntu / Debian** — the system `apt` package is too old; use Erlang Solutions:
 ```sh
@@ -48,43 +44,35 @@ echo "deb [signed-by=/usr/share/keyrings/erlang-solutions.gpg] \
 sudo apt update && sudo apt install -y esl-erlang
 ```
 
-**Windows** — download the OTP 27+ `.exe` from https://www.erlang.org/downloads and
-install it inside WSL2 (Ubuntu). ginger's SSH features require a POSIX shell
-environment; run everything from WSL2.
+**Windows** — install OTP 27+ inside WSL2 and run everything from there; ginger's
+SSH features need a POSIX shell.
 
 ---
 
 ## Step 2 — Install ginger
 
-Download the pre-built escript and make it executable:
-
 ```sh
 curl -fsSL https://github.com/jiangplus/ginger-build/releases/latest/download/ginger \
   -o ~/.local/bin/ginger
 chmod +x ~/.local/bin/ginger
-ginger version   # should print: ginger 0.6.0
+ginger version   # should print: ginger 0.7.0
 ```
 
-Or build from source (requires Gleam and just): `git clone … && cd ginger && just install`.
-
+Or from source (needs Gleam and just): `git clone … && cd ginger && just install`.
 Make sure the install dir is on your PATH.
 
 ---
 
 ## Step 3 — Create `ginger.yml`
 
-Ask the user which stack they want, then fill in the matching template.
-
-### Nomad + Traefik (default)
-
-ginger submits a Nomad job; Traefik auto-discovers it via Docker labels. No Traefik
-registration step needed — start the container and routing begins automatically.
+ginger submits a Nomad job; Traefik auto-discovers it via Docker labels — no
+separate registration step.
 
 ```yaml
 service: myapp                        # container name prefix [a-z0-9_-]
 image: ghcr.io/myorg/myapp            # image name (tag = git SHA by default)
 
-# runner: nomad and egress: traefik are the defaults — you can omit these two lines
+# nomad + traefik are the defaults — these two lines can be omitted
 runner: nomad
 egress: traefik
 
@@ -99,7 +87,7 @@ registry:
   password: GITHUB_TOKEN              # name of the env var / .env key
 
 proxy:
-  hosts: [myapp.example.com]          # domain(s) Traefik will route to this service
+  hosts: [myapp.example.com]          # domain(s) Traefik routes to this service
   app_port: 3000                      # port the container listens on
   ssl: true                           # Traefik handles Let's Encrypt automatically
   health_check_path: /up
@@ -126,21 +114,25 @@ secrets:
     - GITHUB_TOKEN
     - "DATABASE_*"
 
-# Container plumbing passthroughs (both runtimes; all optional)
+# Container plumbing passthroughs (all optional)
 volumes:
   - /opt/myapp/data:/data
 extra_hosts:
   - internal.example.com:10.0.0.9
 labels:
   team: platform
-resources:                            # Nomad task resources (MHz / MB)
-  cpu: 256
-  memory: 512
+resources:
+  cpu: 256                            # MHz, default 256
+  memory: 512                         # MB reservation, default 512
+  memory_max: 0                       # MB burst ceiling; 0 disables oversubscription
 
-# Other services this one depends on (for multi-config deploys; paths are
-# relative to THIS config file)
+# Other services this one depends on (paths relative to THIS config file)
 deps:
   - ../db/ginger.yml
+
+# No build context — roll out an image already in the registry. Needs an explicit
+# -t <tag> since there's no git-sha source.
+deploy_only: false
 
 rolling:
   limit: 25%                          # hosts per batch: integer or percentage
@@ -149,29 +141,43 @@ rolling:
 retain_containers: 5
 ```
 
-### Docker + kamal-proxy
+### Nomad job-template mode
 
-Same file, plus:
+For jobs needing static ports, `template` blocks, multiple tasks, or host volumes —
+beyond what ginger's generated spec and passthrough fields cover — deploy a
+hand-written Nomad job spec instead. ginger still health-gates it (polls
+`nomad job deployments -latest`, dumps the failing allocation's stderr on failure),
+which a plain `hook: nomad job run ...` cannot do.
 
 ```yaml
-runner: docker
-egress: kamal-proxy
-proxy:
-  hosts: [myapp.example.com]
-  app_port: 3000
-  ssl: true
-  health_check_path: /up
-  deploy_timeout: 30
-  drain_timeout: 30
+runner: nomad
+nomad:
+  job_file: /srv/app/deploy/nomad/app.nomad.hcl  # path ON THE DEPLOY HOST
+  job_id: app          # optional, defaults to `service`
+  image_var: image     # optional, defaults to "image"
 ```
 
+The HCL must declare the image as a variable (a sha-tagged ref changes the job
+definition every deploy, so Nomad actually rolls it out instead of no-op'ing on an
+unchanged `:latest` submission):
+
+```hcl
+variable "image" { type = string }
+task "web" { config { image = var.image } }
+```
+
+`job_id` matters because a hand-written spec is named whatever `job "..."` the
+operator wrote, not `<service>-<role>`; `status`, `logs`, and the health gate all
+address that ID.
+
 **Key questions to ask the user before filling this in:**
-- Nomad+Traefik or Docker+kamal-proxy?
 - Service name, image path, registry?
 - Server IPs and SSH user? Domain? Container port?
 - Monorepo? (→ set `builder.context` / `builder.dockerfile`)
 - Do runtime specs pin `:latest`? (→ add `builder.tags: [latest]`)
 - Secrets to inject?
+- Image built elsewhere / no build context? (→ `deploy_only: true`, needs `-t <tag>`)
+- Hand-written Nomad job spec instead of generated one? (→ job-template mode, above)
 
 ---
 
@@ -201,7 +207,7 @@ ginger deploy --tag v1.2.3         # pin a specific image tag instead of git SHA
 ginger redeploy                    # deploy without touching the proxy or pruning
 ginger rollback <version>          # switch traffic back to an older container
 ginger remove                      # stop all containers / purge Nomad jobs
-ginger status                      # job/container status per host
+ginger status                      # job status per host
 ginger logs [-f] [--tail N]        # service logs per host; -f streams live
 ginger history [--tail N]          # deploy audit log from the primary host
 ginger run <pipeline>              # run a custom named pipeline from ginger.yml
@@ -264,6 +270,9 @@ Test with `ssh <user>@<host>` directly.
 **"deploy lock already held"** — a previous deploy crashed while holding the lock:
 `ginger lock release`.
 
+**"runner: nomad requires egress: traefik"** — the two must be paired; easiest fix
+is to omit both lines and take the defaults.
+
 **Nomad deployment failed** — ginger automatically prints the failing allocation's
 last 40 stderr lines. If a task is in crash-loop backoff after a bad image, a plain
 re-run won't recover it — `nomad job stop -purge <job>` then deploy again.
@@ -282,8 +291,5 @@ re-run won't recover it — `nomad job stop -purge <job>` then deploy again.
 (images already pushed are harmless). Fix and re-run; successful services' builds
 hit the registry cache.
 
-**"runner: nomad requires egress: traefik"** — only `nomad+traefik` and
-`docker+kamal-proxy` are valid combinations.
-
-**Traefik/kamal-proxy already running** — ginger detects and reuses any existing
-proxy on the host; other apps served by it are never disrupted.
+**Traefik already running** — ginger detects and reuses any existing Traefik on the
+host; other apps served by it are never disrupted.
