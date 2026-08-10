@@ -1,0 +1,24 @@
+.claude/commands/ginger.md
+  s_9a74f89d8bdf4f::t_9ecb866d9e9313 18-19,28-29,35,47-48,61,68-69,75,90,117,124,129,133-134,146-150,161-162,170-171,210,273-275,294-295
+  s_9a74f89d8bdf4f::t_2f2b3be9aad929 58
+  s_9a74f89d8bdf4f::t_976357a9f620d1 125-127
+  s_9a74f89d8bdf4f::t_259f14f425d57c 144,153-160,163-166,169,172,179-180
+  s_9a74f89d8bdf4f::t_8118f1b652e1d7 22
+  s_9a74f89d8bdf4f::t_3e3bac933e73b4 135-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "a951e161fc57cfeec84d1b445201d93db2fd6f1a",
+  "prompts": {},
+  "sessions": {
+    "s_9a74f89d8bdf4f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f1ddae7-ae95-4440-b722-ab30219b60b1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
