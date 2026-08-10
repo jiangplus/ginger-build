@@ -1,12 +1,47 @@
 -module(env_ffi).
 -export([get_env/0, read_file/1, local_exec/1, local_exec_stream/1, git_sha/1, timestamp/0, mono_ms/0]).
 
+%% Decode a Gleam String (a UTF-8 binary) into the CHARACTER list that
+%% open_port/2 and the file:* functions expect.
+%%
+%% This is not cosmetic. open_port/2 with spawn_executable encodes each element
+%% of `args` according to file:native_name_encoding(), which is utf8 on macOS
+%% and modern Linux. Handing it binary_to_list/1 passes the UTF-8 *bytes* as if
+%% each were a codepoint, and every byte is then re-encoded: "深" (E6 B7 B1)
+%% leaves the port as C3 A6 C2 B7 C2 B1. Decoding to codepoints first makes the
+%% round trip lossless.
+%%
+%% This is what silently mangled a non-ASCII secret injected into a container —
+%% the value arrived double-encoded and the service failed at runtime, with
+%% nothing in the deploy output to suggest ginger had touched it.
+chars(Bin) when is_binary(Bin) ->
+    case unicode:characters_to_list(Bin, utf8) of
+        L when is_list(L) -> L;
+        %% Not valid UTF-8 — a raw byte string from somewhere upstream. Pass the
+        %% bytes through rather than abort a deploy over an encoding guess.
+        _ -> binary_to_list(Bin)
+    end.
+
+%% Encode a character list from the OS back into a UTF-8 binary (a Gleam
+%% String). os:getenv/0 hands back codepoints when the emulator's name encoding
+%% is utf8, so list_to_binary/1 would fail with badarg on any value outside
+%% latin-1 rather than merely corrupting it.
+env_binary(L) ->
+    case file:native_name_encoding() of
+        latin1 -> list_to_binary(L);
+        _ ->
+            case unicode:characters_to_binary(L) of
+                B when is_binary(B) -> B;
+                _ -> list_to_binary(L)
+            end
+    end.
+
 %% Return the whole process environment as a list of {Key, Value} binaries.
 get_env() ->
     lists:filtermap(
         fun(Entry) ->
             case string:split(Entry, "=") of
-                [K, V] -> {true, {list_to_binary(K), list_to_binary(V)}};
+                [K, V] -> {true, {env_binary(K), env_binary(V)}};
                 _ -> false
             end
         end,
@@ -14,8 +49,10 @@ get_env() ->
     ).
 
 %% Read a local file. Returns {ok, Binary} | {error, Binary}.
+%% The contents come back as a raw binary, which is already the file's UTF-8
+%% bytes — only the path needs decoding.
 read_file(Path) ->
-    case file:read_file(binary_to_list(Path)) of
+    case file:read_file(chars(Path)) of
         {ok, Bin} -> {ok, Bin};
         {error, Reason} ->
             {error, list_to_binary(io_lib:format("~p", [Reason]))}
@@ -24,12 +61,12 @@ read_file(Path) ->
 %% Run a shell command on the operator machine, capturing combined
 %% stdout/stderr and the exit status. Returns {Output, ExitStatus}.
 local_exec(Cmd) ->
-    do_exec(binary_to_list(Cmd)).
+    do_exec(chars(Cmd)).
 
 %% Like local_exec/1 but streams each output chunk to stdout as it arrives.
 %% Returns {"", ExitStatus} — the output has already been printed.
 local_exec_stream(Cmd) ->
-    do_exec_stream(binary_to_list(Cmd)).
+    do_exec_stream(chars(Cmd)).
 
 do_exec_stream(Cmd) ->
     Port = open_port(
@@ -66,7 +103,7 @@ collect(Port, Acc) ->
 %% Resolve the current git revision (HEAD) of a directory.
 %% Returns {ok, Sha} | {error, Reason}.
 git_sha(Dir) ->
-    Cmd = "git -C " ++ shell_quote(binary_to_list(Dir)) ++ " rev-parse HEAD",
+    Cmd = "git -C " ++ shell_quote(chars(Dir)) ++ " rev-parse HEAD",
     {Output, Status} = do_exec(Cmd),
     case Status of
         0 -> {ok, string:trim(Output)};

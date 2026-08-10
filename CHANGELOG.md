@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Non-ASCII values survive the deploy instead of arriving double-encoded
+
+An injected secret containing anything outside ASCII reached the container
+corrupted. A Chinese SMS 签名 — `深圳市岑赫科技`, `E6 B7 B1 …` — arrived as
+`C3 A6 C2 B7 C2 B1 …`, the same bytes re-encoded one at a time, and every SMS
+the service tried to send came back `isv.SMS_SIGNATURE_ILLEGAL`.
+
+The cause is not in the dotenv parser or the JSON job spec, both of which
+handle UTF-8 correctly. It is `env_ffi`: `open_port/2` with `spawn_executable`
+encodes each element of `args` according to `file:native_name_encoding()`,
+which is `utf8` on macOS and modern Linux. Passing `binary_to_list/1` hands it
+the UTF-8 *bytes* as though each were a codepoint, so every byte is encoded
+again on the way out. Decoding to codepoints first (`unicode:characters_to_list`)
+makes the round trip lossless.
+
+The failure mode is what made this worth chasing: the deploy reports success,
+nothing in its output mentions the value, and the service fails at runtime
+with an error naming neither ginger nor encoding.
+
+`os:getenv/0` got the mirror-image fix. It returns codepoints under a utf8 name
+encoding, so `list_to_binary/1` would have crashed with `badarg` on a non-ASCII
+value in the process environment rather than merely corrupting it.
+
+Fixed in `local_exec/1`, `local_exec_stream/1`, `git_sha/1` (a non-ASCII repo
+path) and `read_file/1` (a non-ASCII config path).
+
 ### Unknown flags are refused instead of silently ignored
 
 Found by running `ginger deploy --help` and watching it start a real deploy.
