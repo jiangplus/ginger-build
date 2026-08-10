@@ -34,6 +34,12 @@ pub type Runner {
 pub type Context {
   Context(
     config: Config,
+    /// The config file this run was loaded from. Carried so the pipeline
+    /// banner can name it: a repo often holds several (ginger.yml alongside
+    /// ginger.cn.yml), the wrong one is selected by merely omitting `-c`, and
+    /// the output had nothing in it that said which environment was about to
+    /// change.
+    config_path: String,
     version: String,
     secrets: Dict(String, String),
     runner: Runner,

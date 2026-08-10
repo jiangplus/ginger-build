@@ -451,3 +451,66 @@ pub fn deploy_only_defaults_false_test() {
   let assert Ok(config) = decode.from_string(minimal)
   assert config.deploy_only == False
 }
+
+/// `local_image` means the image only ever exists in the target host's Docker
+/// daemon, so requiring registry credentials would force placeholder values.
+pub fn local_image_makes_registry_optional_test() {
+  let yaml =
+    "service: yatch
+image: yatch
+runner: nomad
+egress: traefik
+local_image: true
+servers:
+  web:
+    hosts: [10.0.0.1]
+    primary: true
+"
+  let assert Ok(config) = decode.from_string(yaml)
+  assert config.local_image == True
+  assert config.registry.server == ""
+  assert config.registry.password == ""
+}
+
+/// An explicit `registry:` block is still honoured alongside `local_image` —
+/// useful when a service is bootstrapping now but will pull normally later.
+pub fn local_image_keeps_explicit_registry_test() {
+  let yaml =
+    "service: yatch
+image: yatch
+local_image: true
+servers:
+  web:
+    hosts: [10.0.0.1]
+    primary: true
+registry:
+  server: home-registry.sola.day
+  username: sola
+  password: YATCH_TOKEN
+"
+  let assert Ok(config) = decode.from_string(yaml)
+  assert config.local_image == True
+  assert config.registry.server == "home-registry.sola.day"
+}
+
+pub fn local_image_defaults_false_test() {
+  let assert Ok(config) = decode.from_string(minimal)
+  assert config.local_image == False
+}
+
+/// Without `local_image`, a missing `registry:` is still an error — the flag is
+/// the only thing that relaxes it.
+pub fn registry_still_required_without_local_image_test() {
+  let yaml =
+    "service: yatch
+image: yatch
+servers:
+  web:
+    hosts: [10.0.0.1]
+    primary: true
+"
+  assert case decode.from_string(yaml) {
+    Error(_) -> True
+    Ok(_) -> False
+  }
+}

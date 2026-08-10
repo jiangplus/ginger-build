@@ -15,6 +15,7 @@ import ginger/config.{
 import ginger/context.{type Context}
 import ginger/error.{type GingerError, ConfigError, LockError}
 import ginger/hooks
+import ginger/progress
 import ginger/secrets
 import gleam/list
 import gleam/option.{None, Some}
@@ -22,12 +23,43 @@ import gleam/result
 
 /// Run all steps of a pipeline in order, threading the context. Short-circuits
 /// on the first error.
+///
+/// Opens with a banner naming the config file and target host, times each step
+/// and reports it as it finishes, and closes with the total. Previously this
+/// was a handful of prose lines with no durations and no statement of which
+/// environment was being changed — so the two questions a deploy raises, "where
+/// is this going" and "what took the time", were both unanswerable from the
+/// transcript.
 pub fn run(
   context: Context,
   pipeline: Pipeline,
 ) -> Result(Context, GingerError) {
-  context.log("Running pipeline: " <> pipeline.name)
-  list.try_fold(pipeline.steps, context, run_step)
+  context.log(progress.banner(
+    pipeline.name,
+    context.config,
+    context.config_path,
+    context.version,
+  ))
+  let started = progress.now_ms()
+  use final <- result.try(list.try_fold(pipeline.steps, context, run_timed_step))
+  context.log(progress.total_line(progress.now_ms() - started))
+  Ok(final)
+}
+
+/// Run one step, then report what it was and how long it took.
+fn run_timed_step(
+  context: Context,
+  step: Step,
+) -> Result(Context, GingerError) {
+  let started = progress.now_ms()
+  use next <- result.try(run_step(context, step))
+  context.log(
+    progress.step_line(progress.Timing(
+      progress.step_label(step),
+      progress.now_ms() - started,
+    )),
+  )
+  Ok(next)
 }
 
 /// Interpret a single step.

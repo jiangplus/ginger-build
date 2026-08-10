@@ -1,5 +1,100 @@
 # Changelog
 
+## Unreleased
+
+### Unknown flags are refused instead of silently ignored
+
+Found by running `ginger deploy --help` and watching it start a real deploy.
+
+`--help` was only recognised as the *first* word, and the argument parser's
+catch-all turned every token it did not know into a positional. So
+`["deploy", "--help"]` matched the deploy arm and shipped. The same hole made
+a typo dangerous in a much quieter way:
+
+```
+ginger deploy --conifg ginger.cn.yml   # deployed to ginger.yml — a different environment
+ginger deploy -c                       # ran the pipeline named "-c"
+ginger logs --tail abc                 # printed 100 lines, having asked for "abc"
+```
+
+In each case the flag and its value vanished into the positional list, where
+only the first element is ever read, and the command ran with defaults.
+
+Now:
+
+- an unrecognised `-x`/`--xyz` is a usage error, exit 1;
+- `--help`/`-h` and `--version` are accepted anywhere and outrank the command
+  on the line, so `ginger deploy --help` is always a question;
+- a value-taking flag with nothing after it is an error, not a positional;
+- `--tail`/`--build-concurrency` reject non-numeric and non-positive values
+  rather than falling back to the default;
+- `--` ends flag parsing, for a pipeline or rollback target starting with `-`.
+
+No valid invocation changes behaviour.
+
+### Deploy output says where it is going, and what took the time
+
+The transcript opened with `Running pipeline: deploy` and never named the
+environment — with `ginger.yml` and `ginger.cn.yml` side by side in a repo and
+`-c` selecting between them, the first hint of which one was in play used to be
+a hostname several lines down. There were no durations at all, so "why was that
+deploy slow" could not be answered without running it again.
+
+```
+▸ deploy soon
+  config   ginger.cn.yml
+  target   juluo.xyz
+  version  f25f7fa
+  ...
+  ✓ build            1m 12s
+  ✓ lock               412ms
+  ✓ release             21s
+  total              1m 34s
+```
+
+Durations are monotonic-clock based, so an NTP correction mid-deploy cannot
+report a step as instantaneous. The closing line is the total only — each step
+already printed its own, and a build's line lands directly under the buildx
+output it measured, so re-listing them would double the report without adding
+a fact.
+
+### `local_image:` — deploy an image that is in no registry
+
+Driven by bootstrapping a self-hosted registry (yatch) on homepod: the registry
+cannot pull its own image from itself.
+
+```yaml
+local_image: true     # built straight into the target host's Docker daemon
+```
+
+`deploy_only` was not enough. It drops `Build`/`Push`, but `boot-app` still ran
+`docker login` and pre-pulled the image, and both fail when nothing is behind
+the reference:
+
+```
+Error response from daemon: pull access denied for yatch, repository does not
+exist or may require 'docker login'
+```
+
+The two flags now mean different things — `deploy_only` is *"already in the
+registry"*, `local_image` is *"never in a registry at all"*. `local_image`
+implies `deploy_only` and additionally:
+
+- skips the remote `docker login` (both boot paths),
+- skips the pre-pull,
+- omits registry auth from the generated Nomad task config,
+- makes `registry:` optional — previously a missing block was a hard error, so
+  operators had to invent placeholder credentials,
+- prints `registry: (none — local_image: ...)` in `ginger config` rather than
+  credentials a deploy never uses.
+
+Build with `DOCKER_HOST=ssh://user@host docker build --platform linux/amd64 -t
+app:v1 .`, then `ginger deploy -t v1`. **The build tag and `-t` must match** —
+nothing resolves the image for you.
+
+Backward compatible: defaults to `false`, and every existing behaviour is
+unchanged when unset.
+
 ## 0.7.0 — 2026-07-26
 
 Driven by moving the xjdao.xyz stack (8 services, Nomad + Traefik on a single

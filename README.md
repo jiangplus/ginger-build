@@ -160,6 +160,16 @@ deploy_only: true                # no build context; roll out the image already
                                   # in the registry (drops build/push from every
                                   # pipeline). Requires an explicit -t <tag>.
 
+local_image: true                # the image is NOT in any registry — it was
+                                  # built straight into the target host's Docker
+                                  # daemon. Implies deploy_only and additionally
+                                  # skips docker login, the pre-pull, and the
+                                  # registry auth embedded in the Nomad task.
+                                  # `registry:` becomes optional. Build with:
+                                  #   DOCKER_HOST=ssh://user@host docker build \
+                                  #     --platform linux/amd64 -t app:v1 .
+                                  # then: ginger deploy -t v1  (tags must match)
+
 nomad:                          # job-template mode: deploy a hand-written spec
   job_file: /srv/app/deploy/nomad/app.nomad.hcl  # path on the deploy host
   job_id: app                   # optional, defaults to `service`

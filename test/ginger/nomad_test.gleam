@@ -57,6 +57,7 @@ fn test_config() -> Config {
     deps: [],
     nomad_job: None,
     deploy_only: False,
+    local_image: False,
   )
 }
 

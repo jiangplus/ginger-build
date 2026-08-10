@@ -29,7 +29,10 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
   use service <- result.try(required_string(root, "service"))
   use image <- result.try(required_string(root, "image"))
   use servers <- result.try(decode_servers(root))
-  use registry <- result.try(decode_registry(root))
+  // Decoded before the registry: with a purely local image there is no registry
+  // to require.
+  let local_image = optional_bool_node(root, "local_image", False)
+  use registry <- result.try(decode_registry(root, local_image))
   use proxy <- result.try(decode_proxy(root))
   use builder <- result.try(decode_builder(root))
   use env <- result.try(decode_env(root))
@@ -78,6 +81,7 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
     deps: deps,
     nomad_job: nomad_job,
     deploy_only: deploy_only,
+    local_image: local_image,
   ))
 }
 
@@ -198,8 +202,15 @@ fn decode_hosts(node: glaml.Node) -> Result(List(String), GingerError) {
 
 // --- registry --------------------------------------------------------------
 
-fn decode_registry(root: glaml.Node) -> Result(Registry, GingerError) {
+fn decode_registry(
+  root: glaml.Node,
+  local_image: Bool,
+) -> Result(Registry, GingerError) {
   case field(root, "registry") {
+    // `local_image: true` means the image never touches a registry, so demanding
+    // registry credentials would force the operator to invent placeholder ones.
+    Error(_) if local_image ->
+      Ok(Registry(server: "", username: "", password: ""))
     Error(_) -> Error(ConfigError("missing required key: registry"))
     Ok(reg) -> {
       use server <- result.try(required_string(reg, "server"))

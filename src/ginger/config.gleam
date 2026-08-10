@@ -75,6 +75,24 @@ pub type Config {
     // build context) or forces the operator to hand-write a pipeline just to
     // omit two steps.
     deploy_only: Bool,
+    // The image lives in the target host's Docker daemon and is not in any
+    // registry — it was built there directly (e.g. `DOCKER_HOST=ssh://host
+    // docker build -t app:v1 .`). Implies `deploy_only`, and additionally
+    // suppresses every registry interaction: no `docker login`, no pre-pull,
+    // and no auth embedded in the Nomad task config.
+    //
+    // `deploy_only` alone is NOT enough: it only drops Build/Push, while
+    // `boot-app` still logs in and pre-pulls, both of which fail with no
+    // registry behind the image. The two flags mean different things —
+    // `deploy_only` is "already in the registry", `local_image` is "never in
+    // a registry at all".
+    //
+    // The motivating case is bootstrapping a registry itself: it cannot pull
+    // its own image from itself. Build locally, deploy with `local_image`,
+    // then switch to the normal registry flow once it is serving.
+    //
+    // `registry:` becomes optional when this is set.
+    local_image: Bool,
   )
 }
 

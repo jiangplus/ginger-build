@@ -43,6 +43,7 @@ fn cfg(service: String, deps: List(String)) -> config.Config {
     deps: deps,
     nomad_job: None,
     deploy_only: False,
+    local_image: False,
   )
 }
 

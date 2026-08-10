@@ -38,6 +38,13 @@ pub type Flags {
     build_concurrency: Int,
     follow: Bool,
     tail: Int,
+    /// `--help`/`-h` anywhere, not only as the first word. Carried as a flag
+    /// rather than matched in `route` because `ginger deploy --help` used to
+    /// parse as the positional list ["deploy", "--help"] — which matches the
+    /// deploy arm and shipped a real deploy to whatever config was default.
+    help: Bool,
+    /// `--version` anywhere, for the same reason.
+    version: Bool,
   )
 }
 
@@ -60,29 +67,42 @@ pub fn run() -> Nil {
   dispatch(route(argv.load().arguments))
 }
 
-/// Separate global flags (anywhere) from positional tokens.
-pub fn parse_args(args: List(String)) -> #(List(String), Flags) {
-  do_parse(
-    args,
-    [],
-    Flags(
-      configs: [],
-      tag: None,
-      skip_push: False,
-      build_concurrency: 2,
-      follow: False,
-      tail: 100,
-    ),
+pub fn default_flags() -> Flags {
+  Flags(
+    configs: [],
+    tag: None,
+    skip_push: False,
+    build_concurrency: 2,
+    follow: False,
+    tail: 100,
+    help: False,
+    version: False,
   )
+}
+
+/// Separate global flags (anywhere) from positional tokens.
+///
+/// Returns Error for anything it does not recognise instead of quietly
+/// treating it as a positional. That fallback is how `ginger deploy --help`
+/// became a deploy, and how a mistyped `--conifg prod.yml` deployed to the
+/// default config: both the flag and its value vanished into the positional
+/// list, where only the first element is ever read.
+pub fn parse_args(
+  args: List(String),
+) -> Result(#(List(String), Flags), String) {
+  do_parse(args, [], default_flags())
 }
 
 fn do_parse(
   args: List(String),
   positional: List(String),
   flags: Flags,
-) -> #(List(String), Flags) {
+) -> Result(#(List(String), Flags), String) {
   case args {
-    [] -> #(list.reverse(positional), flags)
+    [] -> Ok(#(list.reverse(positional), flags))
+    // Everything after `--` is positional, whatever it looks like. The escape
+    // hatch for a pipeline or rollback target that begins with a dash.
+    ["--", ..rest] -> Ok(#(list.append(list.reverse(positional), rest), flags))
     ["-c", value, ..rest] | ["--config", value, ..rest] ->
       do_parse(
         rest,
@@ -94,34 +114,97 @@ fn do_parse(
     ["-P", ..rest] | ["--skip-push", ..rest] ->
       do_parse(rest, positional, Flags(..flags, skip_push: True))
     ["--build-concurrency", value, ..rest] ->
-      do_parse(
-        rest,
-        positional,
-        Flags(..flags, build_concurrency: int.parse(value) |> result.unwrap(2)),
-      )
+      case positive_int(value) {
+        Ok(n) ->
+          do_parse(rest, positional, Flags(..flags, build_concurrency: n))
+        Error(_) ->
+          Error(
+            "--build-concurrency needs a positive whole number, got "
+            <> quoted(value),
+          )
+      }
     ["-f", ..rest] | ["--follow", ..rest] ->
       do_parse(rest, positional, Flags(..flags, follow: True))
     ["--tail", value, ..rest] ->
-      do_parse(
-        rest,
-        positional,
-        Flags(..flags, tail: int.parse(value) |> result.unwrap(100)),
-      )
-    [arg, ..rest] -> do_parse(rest, [arg, ..positional], flags)
+      case positive_int(value) {
+        Ok(n) -> do_parse(rest, positional, Flags(..flags, tail: n))
+        Error(_) ->
+          Error("--tail needs a positive whole number, got " <> quoted(value))
+      }
+    ["-h", ..rest] | ["--help", ..rest] ->
+      do_parse(rest, positional, Flags(..flags, help: True))
+    ["--version", ..rest] ->
+      do_parse(rest, positional, Flags(..flags, version: True))
+    // A value-taking flag left dangling at the end of the line. Previously
+    // this fell through to the catch-all and became a positional, so
+    // `ginger deploy -c` ran the pipeline named "-c".
+    [flag] ->
+      case takes_value(flag) {
+        True -> Error(flag <> " needs a value")
+        False -> unknown_or_positional(flag, [], positional, flags)
+      }
+    [arg, ..rest] -> unknown_or_positional(arg, rest, positional, flags)
   }
+}
+
+fn unknown_or_positional(
+  arg: String,
+  rest: List(String),
+  positional: List(String),
+  flags: Flags,
+) -> Result(#(List(String), Flags), String) {
+  case string.starts_with(arg, "-") {
+    True -> Error("unknown flag " <> quoted(arg) <> " (try `ginger help`)")
+    False -> do_parse(rest, [arg, ..positional], flags)
+  }
+}
+
+fn takes_value(flag: String) -> Bool {
+  list.contains(
+    ["-c", "--config", "-t", "--tag", "--build-concurrency", "--tail"],
+    flag,
+  )
+}
+
+fn positive_int(value: String) -> Result(Int, Nil) {
+  case int.parse(value) {
+    Ok(n) if n > 0 -> Ok(n)
+    _ -> Error(Nil)
+  }
+}
+
+fn quoted(value: String) -> String {
+  "'" <> value <> "'"
 }
 
 /// Pure routing of raw arguments to an `Invocation`.
 pub fn route(args: List(String)) -> Invocation {
-  let #(positional, flags) = parse_args(args)
+  case parse_args(args) {
+    Error(message) -> BadUsage(message)
+    Ok(#(positional, flags)) -> route_parsed(positional, flags)
+  }
+}
+
+fn route_parsed(positional: List(String), flags: Flags) -> Invocation {
   let config_path = first_config(flags)
+  // Asking for help or the version outranks whatever command shares the line.
+  // `ginger deploy --help` is a question, never a deploy.
+  case flags.help, flags.version {
+    True, _ -> Help
+    _, True -> ShowVersion
+    False, False -> route_command(positional, flags, config_path)
+  }
+}
+
+fn route_command(
+  positional: List(String),
+  flags: Flags,
+  config_path: String,
+) -> Invocation {
   case positional {
     [] -> Help
     ["help", ..] -> Help
-    ["--help", ..] -> Help
-    ["-h", ..] -> Help
     ["version", ..] -> ShowVersion
-    ["--version", ..] -> ShowVersion
     ["config", ..] -> ConfigDump(config_path)
     ["deploy", ..] -> RunPipeline("deploy", flags)
     ["redeploy", ..] -> RunPipeline("redeploy", flags)
@@ -214,11 +297,13 @@ fn do_execute(
   version_override: Option(String),
 ) -> Result(Nil, GingerError) {
   use config <- result.try(load_config(config_path))
-  use context <- result.try(build_context(config, version_override))
+  use context <- result.try(build_context(config, config_path, version_override))
   use base <- result.try(deploy.select_pipeline(config, name))
   // `deploy_only: true` in the config has the same effect as `--skip-push`:
   // there is nothing to build, so roll out what is already in the registry.
-  let selected = case skip_push || config.deploy_only {
+  // `local_image: true` implies it — a build step would push to a registry the
+  // image is deliberately not in.
+  let selected = case skip_push || config.deploy_only || config.local_image {
     True -> deploy.without_build(base)
     False -> base
   }
@@ -227,6 +312,7 @@ fn do_execute(
 
 fn build_context(
   config: Config,
+  config_path: String,
   version_override: Option(String),
 ) -> Result(context.Context, GingerError) {
   use resolved_version <- result.try(version.resolve(
@@ -238,6 +324,7 @@ fn build_context(
   Ok(
     context.Context(
       config: config,
+      config_path: config_path,
       version: resolved_version,
       secrets: loaded_secrets,
       runner: runner.real(config.ssh_user, config.ssh_timeout * 1000),
@@ -272,7 +359,7 @@ fn do_execute_group(name: String, flags: Flags) -> Result(Nil, GingerError) {
   )
   use jobs <- result.try(
     list.try_map(ordered, fn(entry) {
-      use ctx <- result.try(build_context(entry.config, flags.tag))
+      use ctx <- result.try(build_context(entry.config, entry.path, flags.tag))
       use #(has_build, rest) <- result.try(stack.split_pipeline(
         entry.config,
         name,
@@ -389,11 +476,18 @@ fn render_config(config: Config) -> String {
       "service: " <> config.service,
       "image: " <> config.image,
       "ssh user: " <> config.ssh_user,
-      "registry: "
-        <> config.registry.server
-        <> " (password from secret: "
-        <> config.registry.password
-        <> ")",
+      // `local_image` suppresses login/pull/auth entirely, so printing registry
+      // credentials here would misrepresent what a deploy actually does.
+      case config.local_image {
+        True ->
+          "registry: (none — local_image: image comes from the host's own Docker daemon)"
+        False ->
+          "registry: "
+          <> config.registry.server
+          <> " (password from secret: "
+          <> config.registry.password
+          <> ")"
+      },
       proxy_line,
       nomad_line,
       "roles:",
@@ -614,6 +708,12 @@ OPTIONS:
   --build-concurrency <n>    Parallel builds in multi-config deploys (default 2)
   -f, --follow               Follow logs
   --tail <n>                 Log/history lines to show (default 100)
+  -h, --help                 Show this help (wins over any command on the line)
+  --version                  Print the ginger version
+  --                         Stop reading flags; everything after is positional
+
+Unknown flags are refused rather than ignored — a mistyped --config would
+otherwise deploy to the default config instead of the one you named.
 
 A pipeline in the config with the same name as a command (status, logs,
 history, deploy, ...) takes precedence over the built-in behaviour.

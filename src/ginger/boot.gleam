@@ -201,14 +201,19 @@ fn boot_host_docker(
     context.runner.probe(host, app.running_names(config, role.name))
   let old_version = parse_old_version(config, role.name, running_out)
 
+  // `local_image`: the image is already in the host's daemon and belongs to no
+  // registry, so there is nothing to authenticate against.
   use _ <- result.try(
-    case secrets.resolve(context.secrets, config.registry.password) {
-      Some(password) ->
+    case
+      config.local_image,
+      secrets.resolve(context.secrets, config.registry.password)
+    {
+      False, Some(password) ->
         context.runner.remote(
           host,
           registry_cmd.login_stdin(config.registry, password),
         )
-      option.None -> Ok("")
+      _, _ -> Ok("")
     },
   )
 
@@ -277,14 +282,19 @@ fn boot_host_nomad(
     <> "...",
   )
 
+  // `local_image`: the image is already in the host's daemon and belongs to no
+  // registry, so there is nothing to authenticate against.
   use _ <- result.try(
-    case secrets.resolve(context.secrets, config.registry.password) {
-      Some(password) ->
+    case
+      config.local_image,
+      secrets.resolve(context.secrets, config.registry.password)
+    {
+      False, Some(password) ->
         context.runner.remote(
           host,
           registry_cmd.login_stdin(config.registry, password),
         )
-      option.None -> Ok("")
+      _, _ -> Ok("")
     },
   )
 
@@ -333,19 +343,24 @@ fn boot_host_nomad_generated(
   // Nomad's docker driver does not read the host's ~/.docker/config.json, so
   // embed registry auth in the task config for private image pulls.
   let registry_auth = case
+    config.local_image,
     secrets.resolve(context.secrets, config.registry.password)
   {
-    Some(password) -> Some(#(config.registry.username, password))
-    option.None -> option.None
+    False, Some(password) -> Some(#(config.registry.username, password))
+    _, _ -> option.None
   }
 
   // Pre-pull the image so the Nomad allocation starts without a registry pull
   // delay. The login above already authenticated, so this hits the local layer
   // cache on the Docker daemon and only transfers new layers.
-  use _ <- result.try(context.runner.remote(
-    host,
-    builder_cmd.pull(config, version),
-  ))
+  //
+  // Skipped for `local_image`: the reference resolves to no registry, so the
+  // pull fails outright ("repository does not exist") and takes the deploy with
+  // it. The image is already on the host, which is the whole point.
+  use _ <- result.try(case config.local_image {
+    True -> Ok("")
+    False -> context.runner.remote(host, builder_cmd.pull(config, version))
+  })
 
   use _ <- result.try(context.runner.remote(
     host,

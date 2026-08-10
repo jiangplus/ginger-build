@@ -1,5 +1,5 @@
 -module(env_ffi).
--export([get_env/0, read_file/1, local_exec/1, local_exec_stream/1, git_sha/1, timestamp/0]).
+-export([get_env/0, read_file/1, local_exec/1, local_exec_stream/1, git_sha/1, timestamp/0, mono_ms/0]).
 
 %% Return the whole process environment as a list of {Key, Value} binaries.
 get_env() ->
@@ -75,6 +75,12 @@ git_sha(Dir) ->
 
 shell_quote(S) ->
     "'" ++ lists:flatten([case C of $' -> "'\\''"; _ -> [C] end || C <- S]) ++ "'".
+
+%% Milliseconds from an arbitrary origin, for measuring step durations.
+%% Monotonic, not wall-clock: an NTP correction mid-deploy must not be able to
+%% report a step as having taken negative time.
+mono_ms() ->
+    erlang:monotonic_time(millisecond).
 
 %% UTC timestamp "YYYY-MM-DDTHH:MM:SSZ" for the deploy history log.
 timestamp() ->

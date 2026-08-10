@@ -55,6 +55,7 @@ fn test_config() -> Config {
     deps: [],
     nomad_job: None,
     deploy_only: False,
+    local_image: False,
   )
 }
 
@@ -104,6 +105,7 @@ fn recording_context(sink: Subject(String), existing_proxy: String) -> Context {
     )
   Context(
     config: test_config(),
+    config_path: "ginger.yml",
     version: "v1",
     secrets: dict.new(),
     runner: runner,
@@ -208,6 +210,7 @@ pub fn old_container_is_removed_after_successful_boot_test() {
   let ctx =
     Context(
       config: test_config(),
+      config_path: "ginger.yml",
       version: "v1",
       secrets: dict.new(),
       runner: runner,
