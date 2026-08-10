@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.8.0 — 2026-08-11
+
+Driven by two deploys that went wrong in ways the output did not admit to: one
+that shipped when it had been asked a question, and one that reported success
+while quietly corrupting a secret.
+
+**One deliberate behaviour change**: an unrecognised flag is now a usage error
+instead of being folded into the positional arguments. Anything that relied on
+ginger ignoring a typo will now stop — which is the point, since what it did
+instead was deploy to the wrong environment.
+
 ### Non-ASCII values survive the deploy instead of arriving double-encoded
 
 An injected secret containing anything outside ASCII reached the container

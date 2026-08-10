@@ -25,7 +25,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 
-const version_string = "ginger 0.7.0"
+const version_string = "ginger 0.8.0"
 
 /// Global flags, accepted anywhere on the command line — `ginger -c x deploy`
 /// and `ginger deploy -c x` are equivalent (0.5.0 silently ignored flags
