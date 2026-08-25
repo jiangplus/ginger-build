@@ -1,19 +1,18 @@
 # Runner image for CI: Erlang/OTP + the ginger CLI, ready to `ginger deploy`.
-# Built from the official erlang image so the OTP version always matches what
-# ginger requires; the ginger binary itself is pulled from the latest GitHub
-# release rather than built here, so this stays a one-layer download.
 #
-# Pin to whatever OTP release actually builds the published ginger escript,
-# not just "27+" — the release's .beam files failed to load ("corrupt atom
-# table") under erlang:27-alpine even though 27 nominally satisfies the
-# skill's minimum, because the binary was built with a newer OTP.
+# The GitHub release asset ("latest") is stuck at v0.1.6 — far behind the
+# repo's actual version (see gleam.toml) — so it is NOT a reliable source.
+# Use the escript checked into the repo root instead, which tracks HEAD.
+#
+# erlang:29-alpine, not just "27+": the checked-in escript's .beam files
+# failed to load under 27-alpine ("corrupt atom table") because they were
+# built with a newer OTP than the CLI's stated minimum.
 FROM erlang:29-alpine
 
-RUN apk add --no-cache curl openssh-client docker-cli git
+RUN apk add --no-cache openssh-client docker-cli git
 
-RUN curl -fsSL https://github.com/jiangplus/ginger-build/releases/latest/download/ginger \
-      -o /usr/local/bin/ginger \
-    && chmod +x /usr/local/bin/ginger
+COPY ginger /usr/local/bin/ginger
+RUN chmod +x /usr/local/bin/ginger
 
 WORKDIR /workspace
 ENTRYPOINT ["ginger"]
