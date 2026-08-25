@@ -1,0 +1,21 @@
+.github/workflows/docker-publish.yml
+  s_48a3d075bd0133::t_c9d390a60faba3 1-32
+Dockerfile
+  s_48a3d075bd0133::t_df2d590962afdf 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "d729b356470810e6b90b5b9d76d6b765cf1a7d46",
+  "prompts": {},
+  "sessions": {
+    "s_48a3d075bd0133": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb01a44c-eda1-4b04-97da-246e51ecce9e",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
