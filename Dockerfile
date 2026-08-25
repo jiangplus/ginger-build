@@ -9,7 +9,7 @@
 # built with a newer OTP than the CLI's stated minimum.
 FROM erlang:29-alpine
 
-RUN apk add --no-cache openssh-client docker-cli git
+RUN apk add --no-cache openssh-client docker-cli docker-cli-buildx git
 
 COPY ginger /usr/local/bin/ginger
 RUN chmod +x /usr/local/bin/ginger
