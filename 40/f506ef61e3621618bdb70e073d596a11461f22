@@ -1,0 +1,49 @@
+CHANGELOG.md
+  s_c7c294ddcc30bc::t_084cf013ad693b 5-83
+gleam.toml
+  s_c7c294ddcc30bc::t_4f34d65812941d 2
+src/env_ffi.erl
+  s_c7c294ddcc30bc::t_7ca4c2f0b11dc6 2-3,88-125
+src/ginger/cli.gleam
+  s_c7c294ddcc30bc::t_55d0db8de3d829 28,318,320,368-378,382
+src/ginger/commands/nomad.gleam
+  s_c7c294ddcc30bc::t_9937aed589a58b 47-51,53-63
+src/ginger/config.gleam
+  s_c7c294ddcc30bc::t_52207b22bc6265 96-104,134-143,145-150
+src/ginger/config/decode.gleam
+  s_c7c294ddcc30bc::t_1efd1c8bb0636a 35,86,95,105,107-112
+src/ginger/executor.gleam
+  s_c7c294ddcc30bc::t_5c4504bc995586 91-114
+src/ginger/runner.gleam
+  s_c7c294ddcc30bc::t_c03d3377eb54e7 32-43
+src/ginger/stack.gleam
+  s_c7c294ddcc30bc::t_bcec871bcf9d42 166-171,176-178,180-184,187-195,197-198,202,220-229,242-247,249-250,265-268
+test/ginger/commands_test.gleam
+  s_c7c294ddcc30bc::t_b3cffde5d7b580 63
+test/ginger/config_test.gleam
+  s_c7c294ddcc30bc::t_26dcfc01cfbcdb 450-478
+test/ginger/nomad_test.gleam
+  s_c7c294ddcc30bc::t_96edfcdfd38413 61,302,313,324-357,364,400
+test/ginger/pipeline_test.gleam
+  s_c7c294ddcc30bc::t_960bd6895b6fc8 59
+test/ginger/progress_test.gleam
+  s_c7c294ddcc30bc::t_f3f19c5bdad84c 128
+test/ginger/stack_test.gleam
+  s_c7c294ddcc30bc::t_188813f9b4be0f 6,48,94-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "40f506ef61e3621618bdb70e073d596a11461f22",
+  "prompts": {},
+  "sessions": {
+    "s_c7c294ddcc30bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4902de79-d943-413e-b8b7-c5a851e32947",
+        "model": "claude-opus-5"
+      },
+      "human_author": "jiangplus <jiang.plus.times@gmail.com>"
+    }
+  }
+}
