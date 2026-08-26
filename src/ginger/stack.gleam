@@ -163,33 +163,43 @@ fn run_builds(
         <> int.to_string(concurrency)
         <> " at a time...",
       )
-      builds
-      |> list.sized_chunk(concurrency)
-      |> list.try_fold(Nil, fn(_, batch) { run_build_batch(batch, log) })
+      let sink: Subject(#(String, Result(Nil, GingerError))) =
+        process.new_subject()
+      let started = list.take(builds, concurrency)
+      let queued = list.drop(builds, concurrency)
+      list.each(started, fn(b) { start_build(b, sink, log) })
+      pump(sink, queued, list.length(started), Ok(Nil), log)
     }
   }
 }
 
-fn run_build_batch(
-  batch: List(#(String, fn() -> Result(Nil, GingerError))),
+fn start_build(
+  build: #(String, fn() -> Result(Nil, GingerError)),
+  sink: Subject(#(String, Result(Nil, GingerError))),
   log: fn(String) -> Nil,
-) -> Result(Nil, GingerError) {
-  let sink: Subject(#(String, Result(Nil, GingerError))) = process.new_subject()
-  list.each(batch, fn(build) {
-    let #(service, work) = build
-    log("  build " <> service <> " started")
-    process.spawn(fn() { process.send(sink, #(service, work())) })
-  })
-  collect(sink, list.length(batch), Ok(Nil), log)
+) -> Nil {
+  let #(service, work) = build
+  log("  build " <> service <> " started")
+  process.spawn(fn() { process.send(sink, #(service, work())) })
+  Nil
 }
 
-fn collect(
+/// Keep `concurrency` builds in flight: as soon as one finishes, start the
+/// next.
+///
+/// The previous implementation chunked the list into fixed batches and waited
+/// for an entire batch before starting the next one. A slot freed by a fast
+/// build sat idle until its slowest batch-mate finished — with concurrency 2
+/// and builds of 1, 7, 8 and 1 minutes, the 8-minute build did not start until
+/// seven minutes in, and the whole group took 15 minutes instead of 9.
+fn pump(
   sink: Subject(#(String, Result(Nil, GingerError))),
-  remaining: Int,
+  queued: List(#(String, fn() -> Result(Nil, GingerError))),
+  in_flight: Int,
   acc: Result(Nil, GingerError),
   log: fn(String) -> Nil,
 ) -> Result(Nil, GingerError) {
-  case remaining {
+  case in_flight {
     0 -> acc
     _ -> {
       let #(service, outcome) = process.receive_forever(sink)
@@ -207,7 +217,16 @@ fn collect(
           acc
         }
       }
-      collect(sink, remaining - 1, acc, log)
+      // On failure, stop starting new builds — but still collect the ones
+      // already in flight. Abandoning them would leave a half-written image
+      // and a deploy lock nobody releases.
+      case queued, acc {
+        [next, ..tail], Ok(_) -> {
+          start_build(next, sink, log)
+          pump(sink, tail, in_flight, acc, log)
+        }
+        _, _ -> pump(sink, [], in_flight - 1, acc, log)
+      }
     }
   }
 }
@@ -220,8 +239,15 @@ pub fn split_pipeline(
   name: String,
 ) -> Result(#(Bool, config.Pipeline), GingerError) {
   use selected <- result.try(deploy.select_pipeline(entry_config, name))
+  // `deploy_only`/`local_image` mean there is no source to build — the image
+  // comes from elsewhere. Single-config deploys have always honoured this;
+  // group mode did not, and so ran `docker buildx build` in a directory with
+  // no Dockerfile for every upstream-image service in the set, failing the
+  // whole deploy.
+  let nothing_to_build = entry_config.deploy_only || entry_config.local_image
   let has_build =
-    list.any(selected.steps, fn(step) {
+    !nothing_to_build
+    && list.any(selected.steps, fn(step) {
       case step {
         config.Build -> True
         _ -> False
@@ -236,5 +262,8 @@ pub fn entry_version(
   entry: Entry,
   tag: Option(String),
 ) -> Result(String, GingerError) {
-  version.resolve(tag, entry.config.builder.context)
+  version.resolve(
+    option.or(tag, entry.config.tag),
+    entry.config.builder.context,
+  )
 }

@@ -44,15 +44,23 @@ pub fn run_job(
 /// `-detach` is deliberately NOT used: `nomad job run` blocks until the
 /// deployment settles, and ginger's health gate polls afterwards anyway. The
 /// blocking form also surfaces plan/parse errors as a non-zero exit.
+///
+/// When the config sets `nomad.var_file`, it is passed through as
+/// `-var-file=<path>`. Order matters to Nomad only in that later `-var` wins
+/// over a var file, which is what we want: the image ref ginger computed
+/// always beats a stale value left in the file.
 pub fn run_job_file(job: NomadJob, image_ref: String) -> Command {
-  command.run([
-    "nomad",
-    "job",
-    "run",
-    "-var",
-    job.image_var <> "=" <> image_ref,
-    job.job_file,
-  ])
+  let var_file = case job.var_file {
+    option.Some(path) -> ["-var-file=" <> path]
+    option.None -> []
+  }
+  command.run(
+    list.flatten([
+      ["nomad", "job", "run"],
+      var_file,
+      ["-var", job.image_var <> "=" <> image_ref, job.job_file],
+    ]),
+  )
 }
 
 /// Gracefully stop (drain) a Nomad job and remove it from state.

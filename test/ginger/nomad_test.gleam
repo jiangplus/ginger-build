@@ -58,6 +58,7 @@ fn test_config() -> Config {
     nomad_job: None,
     deploy_only: False,
     local_image: False,
+    tag: None,
   )
 }
 
@@ -298,6 +299,7 @@ fn job_template_config() -> Config {
       job_file: "/srv/xjdao/deploy/nomad/social-app.nomad.hcl",
       job_id: Some("social-app"),
       image_var: "image",
+      var_file: None,
     )),
   )
 }
@@ -308,6 +310,7 @@ pub fn run_job_file_passes_image_as_hcl_var_test() {
       job_file: "/srv/app/web.nomad.hcl",
       job_id: None,
       image_var: "image",
+      var_file: None,
     )
   let rendered =
     nomad.run_job_file(job, "reg.example.com/app:abc1234")
@@ -318,12 +321,47 @@ pub fn run_job_file_passes_image_as_hcl_var_test() {
   assert string.contains(rendered, "/srv/app/web.nomad.hcl")
 }
 
+// A var file lets the spec stay a plain checked-in .nomad.hcl instead of a
+// template the operator renders before every deploy. Everything that varies
+// per environment lives in the file; the spec references it as `var.<name>`.
+pub fn run_job_file_passes_var_file_test() {
+  let job =
+    NomadJob(
+      job_file: "/srv/app/web.nomad.hcl",
+      job_id: None,
+      image_var: "image",
+      var_file: Some("/srv/app/deploy.vars"),
+    )
+  let rendered =
+    nomad.run_job_file(job, "reg.example.com/app:abc1234")
+    |> command.to_string
+  assert string.contains(rendered, "-var-file=/srv/app/deploy.vars")
+  // The image ref must still be passed, and as a later flag so it wins over
+  // any stale value the var file happens to carry.
+  assert string.contains(rendered, "image=reg.example.com/app:abc1234")
+}
+
+pub fn run_job_file_omits_var_file_when_unset_test() {
+  let job =
+    NomadJob(
+      job_file: "/srv/app/web.nomad.hcl",
+      job_id: None,
+      image_var: "image",
+      var_file: None,
+    )
+  let rendered =
+    nomad.run_job_file(job, "reg.example.com/app:abc1234")
+    |> command.to_string
+  assert !string.contains(rendered, "-var-file")
+}
+
 pub fn run_job_file_honours_custom_image_var_test() {
   let job =
     NomadJob(
       job_file: "/srv/app/web.nomad.hcl",
       job_id: None,
       image_var: "container_image",
+      var_file: None,
     )
   let rendered =
     nomad.run_job_file(job, "reg.example.com/app:abc1234")
@@ -359,6 +397,7 @@ pub fn job_template_job_id_defaults_to_service_test() {
         job_file: "/srv/app/web.nomad.hcl",
         job_id: None,
         image_var: "image",
+        var_file: None,
       )),
     )
   let rendered = nomad.status_job(config, "web") |> command.to_string

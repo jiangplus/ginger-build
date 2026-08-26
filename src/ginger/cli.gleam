@@ -25,7 +25,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 
-const version_string = "ginger 0.8.0"
+const version_string = "ginger 0.9.0"
 
 /// Global flags, accepted anywhere on the command line — `ginger -c x deploy`
 /// and `ginger deploy -c x` are equivalent (0.5.0 silently ignored flags
@@ -315,8 +315,9 @@ fn build_context(
   config_path: String,
   version_override: Option(String),
 ) -> Result(context.Context, GingerError) {
+  // Precedence: `-t` on the command line > `tag:` in the config > git sha.
   use resolved_version <- result.try(version.resolve(
-    version_override,
+    option.or(version_override, config.tag),
     config.builder.context,
   ))
   let loaded_secrets = secrets.load(config.secrets)
@@ -364,10 +365,21 @@ fn do_execute_group(name: String, flags: Flags) -> Result(Nil, GingerError) {
         entry.config,
         name,
       ))
+      // Builds run concurrently, so their output has to say who it came from.
+      // The deploy phase is sequential and already announces each service, so
+      // it keeps the unprefixed runner.
+      let build_ctx =
+        context.Context(
+          ..ctx,
+          runner: runner.with_prefix(
+            ctx.runner,
+            "[" <> entry.config.service <> "] ",
+          ),
+        )
       let build = case has_build && !flags.skip_push {
         True ->
           Some(fn() {
-            pipeline.run_step(ctx, config.Build) |> result.replace(Nil)
+            pipeline.run_step(build_ctx, config.Build) |> result.replace(Nil)
           })
         False -> None
       }

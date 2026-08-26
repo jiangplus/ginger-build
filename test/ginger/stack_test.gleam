@@ -3,6 +3,7 @@ import ginger/config.{
   TraefikEgress,
 }
 import ginger/stack
+import gleam/erlang/process
 import gleam/list
 import gleam/option.{None}
 
@@ -44,6 +45,7 @@ fn cfg(service: String, deps: List(String)) -> config.Config {
     nomad_job: None,
     deploy_only: False,
     local_image: False,
+    tag: None,
   )
 }
 
@@ -88,4 +90,60 @@ pub fn topo_order_cycle_test() {
     stack.Entry(path: "b.yml", config: cfg("b", ["a.yml"])),
   ]
   let assert Error(_) = stack.topo_order(entries)
+}
+
+/// Group mode used to build every service in the set, `deploy_only` ones
+/// included — `docker buildx build` in a directory with no Dockerfile, which
+/// fails the whole deploy. Single-config deploys had always honoured the flag.
+pub fn split_pipeline_skips_build_for_deploy_only_test() {
+  let base = cfg("plc", [])
+  let assert Ok(#(has_build, rest)) =
+    stack.split_pipeline(Config(..base, deploy_only: True), "deploy")
+  assert has_build == False
+  assert !list.contains(rest.steps, config.Build)
+  assert !list.contains(rest.steps, config.Push)
+}
+
+pub fn split_pipeline_skips_build_for_local_image_test() {
+  let base = cfg("yatch", [])
+  let assert Ok(#(has_build, _)) =
+    stack.split_pipeline(Config(..base, local_image: True), "deploy")
+  assert has_build == False
+}
+
+/// A service with source still builds — the fix must not disable builds wholesale.
+pub fn split_pipeline_keeps_build_for_source_service_test() {
+  let assert Ok(#(has_build, _)) =
+    stack.split_pipeline(cfg("rice", []), "deploy")
+  assert has_build == True
+}
+
+/// The build pool must keep `concurrency` builds in flight, starting the next
+/// one the moment a slot frees.
+///
+/// With fixed batches (the old behaviour) a batch had to finish entirely
+/// before the next began: here A would free its slot after 10ms but C could
+/// not start until B's 300ms were up, so C finished last. With a rolling pool
+/// C starts right after A and finishes long before B.
+pub fn run_group_starts_next_build_as_soon_as_a_slot_frees_test() {
+  let events = process.new_subject()
+  let job = fn(name, sleep_ms) {
+    stack.Job(
+      entry: stack.Entry(path: name <> ".yml", config: cfg(name, [])),
+      build: option.Some(fn() {
+        process.sleep(sleep_ms)
+        process.send(events, name)
+        Ok(Nil)
+      }),
+      deploy: fn() { Ok(Nil) },
+    )
+  }
+  let assert Ok(_) =
+    stack.run_group([job("a", 10), job("b", 300), job("c", 10)], 2, fn(_) {
+      Nil
+    })
+  let assert Ok(first) = process.receive(events, 2000)
+  let assert Ok(second) = process.receive(events, 2000)
+  let assert Ok(third) = process.receive(events, 2000)
+  assert [first, second, third] == ["a", "c", "b"]
 }

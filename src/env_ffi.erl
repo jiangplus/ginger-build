@@ -1,5 +1,6 @@
 -module(env_ffi).
--export([get_env/0, read_file/1, local_exec/1, local_exec_stream/1, git_sha/1, timestamp/0, mono_ms/0]).
+-export([get_env/0, read_file/1, local_exec/1, local_exec_stream/1,
+         local_exec_stream_prefixed/2, git_sha/1, timestamp/0, mono_ms/0]).
 
 %% Decode a Gleam String (a UTF-8 binary) into the CHARACTER list that
 %% open_port/2 and the file:* functions expect.
@@ -82,6 +83,44 @@ stream_collect(Port) ->
             stream_collect(Port);
         {Port, {exit_status, Status}} ->
             {<<"">>, Status}
+    end.
+
+%% Same as local_exec_stream/1, but tags every line with a prefix.
+%%
+%% Concurrent builds all wrote to the same stdout through io:put_chars/1 on raw
+%% port chunks — chunks, not lines, so two builds could interleave *within* a
+%% line. The output was unattributable: several "#24 DONE 185.9s" lines with no
+%% way to tell which service each belonged to. Buffering to line boundaries and
+%% prefixing fixes both problems at once.
+local_exec_stream_prefixed(Cmd, Prefix) ->
+    Port = open_port(
+        {spawn_executable, "/bin/sh"},
+        [{args, ["-c", chars(Cmd)]}, exit_status, stderr_to_stdout, binary, use_stdio]
+    ),
+    stream_collect_prefixed(Port, Prefix, <<"">>).
+
+stream_collect_prefixed(Port, Prefix, Buf) ->
+    receive
+        {Port, {data, Data}} ->
+            Rest = emit_lines(Prefix, <<Buf/binary, Data/binary>>),
+            stream_collect_prefixed(Port, Prefix, Rest);
+        {Port, {exit_status, Status}} ->
+            %% A trailing fragment with no newline still has to be shown —
+            %% dropping it would silently eat the last line of a failing build.
+            case Buf of
+                <<"">> -> ok;
+                _ -> io:put_chars([Prefix, Buf, $\n])
+            end,
+            {<<"">>, Status}
+    end.
+
+emit_lines(Prefix, Buf) ->
+    case binary:split(Buf, <<"\n">>) of
+        [Line, Rest] ->
+            io:put_chars([Prefix, Line, $\n]),
+            emit_lines(Prefix, Rest);
+        [Rest] ->
+            Rest
     end.
 
 do_exec(Cmd) ->

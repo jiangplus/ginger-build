@@ -2,6 +2,85 @@
 
 ## Unreleased
 
+### Parallel builds no longer wait for a whole batch
+
+`--build-concurrency` chunked the build list into fixed batches and ran them
+one batch at a time, so a slot freed by a fast build sat idle until its
+slowest batch-mate finished. Measured on a four-service deploy at the default
+concurrency of 2: a 3-minute build and a 7-minute build shared the first
+batch, and the 8-minute build behind them did not start until minute 7 — the
+group took 15 minutes where 9 were possible.
+
+It is now a rolling pool: the next queued build starts the moment any build
+finishes. Queue order is unchanged (the topo order), and the deploy phase
+still runs strictly in dependency order — only the idle slots are gone.
+
+On failure, no further builds are started, but the ones already in flight are
+still awaited rather than abandoned mid-write.
+
+### Concurrent build output says which service it came from
+
+Builds streamed raw port chunks to a shared stdout, so several concurrent
+builds interleaved — sometimes within a single line — with nothing to
+attribute a line to a service. Deciphering "which of these four builds took
+186 seconds?" meant correlating timestamps by hand.
+
+Local streamed output is now buffered to line boundaries and each line is
+tagged `[service] ` while builds run concurrently. The sequential deploy phase
+is unchanged; it already announces each service before acting.
+
+### Fixed: group mode built `deploy_only` services
+
+A multi-config deploy ran `docker buildx build` for every service in the set,
+including those marked `deploy_only` (or `local_image`) — services that have
+no source and whose image comes from elsewhere. The build ran in a directory
+with no Dockerfile, failed, and took the whole deploy down with it. Single-
+config deploys had honoured the flag since it was introduced; group mode
+computed "does this have a build step?" from the pipeline alone and never
+consulted the config.
+
+### `tag:` — per-service version in a multi-config deploy
+
+`-t/--tag` is a single global flag. A deploy set mixing services built from
+source with `deploy_only` ones could therefore not be expressed in one
+invocation: the deploy-only services have no build context and so no git sha
+to version from, but pinning `-t` on their behalf also pins — and mis-tags —
+every service built from source. The result was one `ginger deploy` per
+service, serialised, which throws away the parallel builds that multi-config
+deploys exist for.
+
+```yaml
+tag: latest    # used when -t is not given
+```
+
+Precedence is `-t` > `tag:` > git sha of the build context.
+
+### `nomad.var_file` — job specs can stay plain HCL
+
+Job-template mode passed exactly one variable, the image ref. Everything else
+that varies per environment — domains, registry host, node IP, registry
+credentials — had nowhere to go, so the spec had to be a *template* that the
+operator rendered before every deploy. That is not a hypothetical: a set of
+`.hcl.erb` files existed solely because ginger offered no other way to get a
+hostname into a `tags` or `extra_hosts` field, neither of which a Nomad
+`template` stanza can reach (they are job-level fields, not runtime env).
+
+A rendered spec is worse than a plain one in ways that bite: `nomad job
+validate` cannot read it, neither can anyone reviewing a diff, and "did I
+re-render before deploying?" becomes a real failure mode.
+
+```yaml
+nomad:
+  job_file: /srv/app/web.nomad.hcl
+  var_file: /srv/app/deploy.vars   # new; optional
+```
+
+becomes `nomad job run -var-file=/srv/app/deploy.vars -var image=… <job_file>`.
+Both paths are resolved by the remote `nomad` CLI, not by ginger. The image
+`-var` is emitted *after* the var file so it wins over any stale value there.
+
+Omitted, nothing changes — no `-var-file` appears on the command line.
+
 ## 0.8.0 — 2026-08-11
 
 Driven by two deploys that went wrong in ways the output did not admit to: one

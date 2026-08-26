@@ -447,6 +447,35 @@ registry:
   assert config.deploy_only == True
 }
 
+/// `-t` is a single global flag, so a multi-config deploy mixing built and
+/// deploy-only services cannot express per-service versions. `tag:` gives the
+/// deploy-only ones a version of their own without pinning the built ones.
+pub fn tag_is_decoded_test() {
+  let yaml =
+    "service: plc
+image: plc
+runner: nomad
+egress: traefik
+deploy_only: true
+tag: latest
+servers:
+  web:
+    hosts: [10.0.0.1]
+    primary: true
+registry:
+  server: reg.example.com
+  username: u
+  password: P
+"
+  let assert Ok(config) = decode.from_string(yaml)
+  assert config.tag == Some("latest")
+}
+
+pub fn tag_defaults_to_none_test() {
+  let assert Ok(config) = decode.from_string(minimal)
+  assert config.tag == None
+}
+
 pub fn deploy_only_defaults_false_test() {
   let assert Ok(config) = decode.from_string(minimal)
   assert config.deploy_only == False

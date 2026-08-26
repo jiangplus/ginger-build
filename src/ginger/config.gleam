@@ -93,6 +93,15 @@ pub type Config {
     //
     // `registry:` becomes optional when this is set.
     local_image: Bool,
+    // Default image tag, used when `-t/--tag` is not given on the command
+    // line. Precedence: `-t` > `tag:` > the git sha of the build context.
+    //
+    // It exists for multi-config deploys. `-t` is a single global flag, so a
+    // deploy set mixing built-from-source services with `deploy_only` ones
+    // was impossible to express: the latter have no build context and so no
+    // git sha to derive a version from, but pinning `-t` for their sake
+    // would also pin — and thus mis-tag — every service built from source.
+    tag: Option(String),
   )
 }
 
@@ -122,8 +131,23 @@ pub type Config {
 /// Passing the image as a variable also sidesteps the `:latest` no-op trap:
 /// a sha-tagged image ref changes the job definition every deploy, so Nomad
 /// actually rolls it out instead of treating the submission as unchanged.
+/// `var_file` is an optional HCL2 variable file passed through as
+/// `nomad job run -var-file=<path>`. The path is resolved **on the host that
+/// runs the deploy**, alongside `job_file` — both are read by the remote
+/// `nomad` CLI, not by ginger.
+///
+/// It exists so that a job spec can stay a plain, checked-in `.nomad.hcl`
+/// that `nomad job validate` accepts as-is, instead of being a template the
+/// operator has to render before every deploy. Everything that varies per
+/// environment (domains, registry host, node IP) goes in the var file; the
+/// spec references it as `var.<name>`.
 pub type NomadJob {
-  NomadJob(job_file: String, job_id: Option(String), image_var: String)
+  NomadJob(
+    job_file: String,
+    job_id: Option(String),
+    image_var: String,
+    var_file: Option(String),
+  )
 }
 
 /// Nomad task resource reservation.

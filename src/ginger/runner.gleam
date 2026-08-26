@@ -29,6 +29,18 @@ pub fn real(ssh_user: String, default_timeout_ms: Int) -> Runner {
   )
 }
 
+/// Tag every streamed line of this runner's *local* commands with a prefix.
+///
+/// Only local streaming is wrapped, because that is where a build's output
+/// comes from (`docker buildx build` runs locally against a remote
+/// DOCKER_HOST). Concurrent builds otherwise write raw port chunks to one
+/// stdout, interleaving even within a line.
+pub fn with_prefix(r: Runner, prefix: String) -> Runner {
+  Runner(..r, local_streamed: fn(cmd) {
+    executor.run_local_streamed_prefixed(cmd, prefix)
+  })
+}
+
 fn session(ssh_user: String, host: String) -> Result(ssh.Session, GingerError) {
   case ssh.ensure_started() {
     Error(e) -> Error(e)

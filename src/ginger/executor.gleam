@@ -88,6 +88,30 @@ pub fn run_local(cmd: Command) -> Result(String, GingerError) {
 /// Like `run_local` but streams output to stdout as it arrives instead of
 /// capturing it. Used for long-running commands like `docker buildx build`
 /// where the user wants to see progress in real time.
+@external(erlang, "env_ffi", "local_exec_stream_prefixed")
+fn ffi_local_exec_stream_prefixed(cmd: String, prefix: String) -> #(String, Int)
+
+/// Stream a local command, tagging every line with `prefix`.
+/// Used when several builds run concurrently and their output would otherwise
+/// be indistinguishable.
+pub fn run_local_streamed_prefixed(
+  cmd: Command,
+  prefix: String,
+) -> Result(String, GingerError) {
+  let rendered = command.to_string(cmd)
+  let #(_, exit) = ffi_local_exec_stream_prefixed(rendered, prefix)
+  case exit {
+    0 -> Ok("")
+    _ ->
+      Error(HookFailed(
+        "local command failed (exit "
+        <> int.to_string(exit)
+        <> "): "
+        <> rendered,
+      ))
+  }
+}
+
 pub fn run_local_streamed(cmd: Command) -> Result(String, GingerError) {
   let rendered = command.to_string(cmd)
   let #(_, exit) = ffi_local_exec_stream(rendered)

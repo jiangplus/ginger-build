@@ -32,6 +32,7 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
   // Decoded before the registry: with a purely local image there is no registry
   // to require.
   let local_image = optional_bool_node(root, "local_image", False)
+  let tag = optional_string_node(root, "tag")
   use registry <- result.try(decode_registry(root, local_image))
   use proxy <- result.try(decode_proxy(root))
   use builder <- result.try(decode_builder(root))
@@ -82,6 +83,7 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
     nomad_job: nomad_job,
     deploy_only: deploy_only,
     local_image: local_image,
+    tag: tag,
   ))
 }
 
@@ -90,6 +92,7 @@ fn decode_root(root: glaml.Node) -> Result(Config, GingerError) {
 ///   job_file: /srv/xjdao/deploy/nomad/social-app.nomad.hcl
 ///   job_id: social-app     # optional, defaults to `service`
 ///   image_var: image       # optional, defaults to "image"
+///   var_file: /srv/xjdao/deploy/nomad/deploy.vars   # optional
 /// ```
 fn decode_nomad_job(root: glaml.Node) -> Result(Option(NomadJob), GingerError) {
   case field(root, "nomad") {
@@ -99,8 +102,14 @@ fn decode_nomad_job(root: glaml.Node) -> Result(Option(NomadJob), GingerError) {
       let job_id = optional_string_node(node, "job_id")
       let image_var =
         optional_string_node(node, "image_var") |> option.unwrap("image")
+      let var_file = optional_string_node(node, "var_file")
       Ok(
-        Some(NomadJob(job_file: job_file, job_id: job_id, image_var: image_var)),
+        Some(NomadJob(
+          job_file: job_file,
+          job_id: job_id,
+          image_var: image_var,
+          var_file: var_file,
+        )),
       )
     }
   }

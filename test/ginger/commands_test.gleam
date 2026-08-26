@@ -60,6 +60,7 @@ fn test_config() -> Config {
     nomad_job: None,
     deploy_only: False,
     local_image: False,
+    tag: None,
   )
 }
 
